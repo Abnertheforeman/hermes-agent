@@ -6,11 +6,15 @@ retrieval. Supports cloud (API key) and local modes.
 Original PR #1811 by benfrank241, adapted to MemoryProvider ABC.
 
 Config via environment variables:
-  HINDSIGHT_API_KEY   — API key for Hindsight Cloud
-  HINDSIGHT_BANK_ID   — memory bank identifier (default: hermes)
-  HINDSIGHT_BUDGET    — recall budget: low/mid/high (default: mid)
-  HINDSIGHT_API_URL   — API endpoint
-  HINDSIGHT_MODE      — cloud or local (default: cloud)
+  HINDSIGHT_API_KEY                — API key for Hindsight Cloud
+  HINDSIGHT_BANK_ID                — memory bank identifier (default: hermes)
+  HINDSIGHT_BUDGET                 — recall budget: low/mid/high (default: mid)
+  HINDSIGHT_API_URL                — API endpoint
+  HINDSIGHT_MODE                   — cloud or local (default: cloud)
+  HINDSIGHT_RETAIN_TAGS            — comma-separated tags attached to retained memories
+  HINDSIGHT_RETAIN_SOURCE          — metadata source value attached to retained memories
+  HINDSIGHT_RETAIN_USER_PREFIX     — label used before user turns in retained transcripts
+  HINDSIGHT_RETAIN_ASSISTANT_PREFIX — label used before assistant turns in retained transcripts
 
 Or via $HERMES_HOME/hindsight/config.json (profile-scoped), falling back to
 ~/.hindsight/config.json (legacy, shared) for backward compatibility.
@@ -24,6 +28,7 @@ import logging
 import os
 import threading
 
+from datetime import datetime, timezone
 from hermes_constants import get_hermes_home
 from typing import Any, Dict, List
 
@@ -164,6 +169,10 @@ def _load_config() -> dict:
     return {
         "mode": os.environ.get("HINDSIGHT_MODE", "cloud"),
         "apiKey": os.environ.get("HINDSIGHT_API_KEY", ""),
+        "retain_tags": os.environ.get("HINDSIGHT_RETAIN_TAGS", ""),
+        "retain_source": os.environ.get("HINDSIGHT_RETAIN_SOURCE", ""),
+        "retain_user_prefix": os.environ.get("HINDSIGHT_RETAIN_USER_PREFIX", "User"),
+        "retain_assistant_prefix": os.environ.get("HINDSIGHT_RETAIN_ASSISTANT_PREFIX", "Assistant"),
         "banks": {
             "hermes": {
                 "bankId": os.environ.get("HINDSIGHT_BANK_ID", "hermes"),
@@ -172,6 +181,48 @@ def _load_config() -> dict:
             }
         },
     }
+
+
+def _normalize_retain_tags(value: Any) -> List[str]:
+    """Normalize retain_tags config to a deduplicated list of strings."""
+    if value is None:
+        return []
+
+    raw_items: list[Any]
+    if isinstance(value, list):
+        raw_items = value
+    elif isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return []
+        if text.startswith("["):
+            try:
+                parsed = json.loads(text)
+            except Exception:
+                parsed = None
+            if isinstance(parsed, list):
+                raw_items = parsed
+            else:
+                raw_items = text.split(",")
+        else:
+            raw_items = text.split(",")
+    else:
+        raw_items = [value]
+
+    normalized = []
+    seen = set()
+    for item in raw_items:
+        tag = str(item).strip()
+        if not tag or tag in seen:
+            continue
+        seen.add(tag)
+        normalized.append(tag)
+    return normalized
+
+
+def _utc_timestamp() -> str:
+    """Return current UTC timestamp in ISO-8601 with milliseconds and Z suffix."""
+    return datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
 
 
 # ---------------------------------------------------------------------------
@@ -190,6 +241,10 @@ class HindsightMemoryProvider(MemoryProvider):
         self._mode = "cloud"
         self._memory_mode = "hybrid"  # "context", "tools", or "hybrid"
         self._prefetch_method = "recall"  # "recall" or "reflect"
+        self._retain_tags: List[str] = []
+        self._retain_source = ""
+        self._retain_user_prefix = "User"
+        self._retain_assistant_prefix = "Assistant"
         self._client = None
         self._prefetch_result = ""
         self._prefetch_lock = threading.Lock()
@@ -240,6 +295,10 @@ class HindsightMemoryProvider(MemoryProvider):
             {"key": "budget", "description": "Recall thoroughness", "default": "mid", "choices": ["low", "mid", "high"]},
             {"key": "memory_mode", "description": "Memory integration mode", "default": "hybrid", "choices": ["hybrid", "context", "tools"]},
             {"key": "prefetch_method", "description": "Auto-recall method", "default": "recall", "choices": ["recall", "reflect"]},
+            {"key": "retain_tags", "description": "Comma-separated tags attached to retained memories", "default": ""},
+            {"key": "retain_source", "description": "Metadata source value attached to retained memories", "default": ""},
+            {"key": "retain_user_prefix", "description": "Label used before user turns in retained transcripts", "default": "User"},
+            {"key": "retain_assistant_prefix", "description": "Label used before assistant turns in retained transcripts", "default": "Assistant"},
         ]
 
     def _get_client(self):
@@ -283,8 +342,30 @@ class HindsightMemoryProvider(MemoryProvider):
         prefetch_method = self._config.get("prefetch_method", "recall")
         self._prefetch_method = prefetch_method if prefetch_method in ("recall", "reflect") else "recall"
 
-        logger.info("Hindsight initialized: mode=%s, api_url=%s, bank=%s, budget=%s, memory_mode=%s, prefetch_method=%s",
-                     self._mode, self._api_url, self._bank_id, self._budget, self._memory_mode, self._prefetch_method)
+        self._retain_tags = _normalize_retain_tags(
+            self._config.get("retain_tags") or os.environ.get("HINDSIGHT_RETAIN_TAGS", "")
+        )
+        self._retain_source = str(
+            self._config.get("retain_source") or os.environ.get("HINDSIGHT_RETAIN_SOURCE", "")
+        ).strip()
+        self._retain_user_prefix = str(
+            self._config.get("retain_user_prefix") or os.environ.get("HINDSIGHT_RETAIN_USER_PREFIX", "User")
+        ).strip() or "User"
+        self._retain_assistant_prefix = str(
+            self._config.get("retain_assistant_prefix") or os.environ.get("HINDSIGHT_RETAIN_ASSISTANT_PREFIX", "Assistant")
+        ).strip() or "Assistant"
+
+        logger.info(
+            "Hindsight initialized: mode=%s, api_url=%s, bank=%s, budget=%s, memory_mode=%s, prefetch_method=%s, retain_tags=%s, retain_source=%s",
+            self._mode,
+            self._api_url,
+            self._bank_id,
+            self._budget,
+            self._memory_mode,
+            self._prefetch_method,
+            self._retain_tags,
+            self._retain_source,
+        )
 
         # For local mode, start the embedded daemon in the background so it
         # doesn't block the chat. Redirect stdout/stderr to a log file to
@@ -407,16 +488,34 @@ class HindsightMemoryProvider(MemoryProvider):
         self._prefetch_thread = threading.Thread(target=_run, daemon=True, name="hindsight-prefetch")
         self._prefetch_thread.start()
 
+    def _build_turn_content(self, user_content: str, assistant_content: str) -> str:
+        return (
+            f"{self._retain_user_prefix}: {user_content}\n"
+            f"{self._retain_assistant_prefix}: {assistant_content}"
+        )
+
+    def _build_retain_kwargs(self, content: str, *, context: str | None = None) -> Dict[str, Any]:
+        kwargs: Dict[str, Any] = {
+            "bank_id": self._bank_id,
+            "content": content,
+            "metadata": {"retained_at": _utc_timestamp()},
+        }
+        if context is not None:
+            kwargs["context"] = context
+        if self._retain_source:
+            kwargs["metadata"]["source"] = self._retain_source
+        if self._retain_tags:
+            kwargs["tags"] = self._retain_tags
+        return kwargs
+
     def sync_turn(self, user_content: str, assistant_content: str, *, session_id: str = "") -> None:
         """Retain conversation turn in background (non-blocking)."""
-        combined = f"User: {user_content}\nAssistant: {assistant_content}"
+        combined = self._build_turn_content(user_content, assistant_content)
 
         def _sync():
             try:
                 client = self._get_client()
-                _run_sync(client.aretain(
-                    bank_id=self._bank_id, content=combined, context="conversation"
-                ))
+                _run_sync(client.aretain(**self._build_retain_kwargs(combined, context="conversation")))
             except Exception as e:
                 logger.warning("Hindsight sync failed: %s", e)
 
@@ -443,9 +542,7 @@ class HindsightMemoryProvider(MemoryProvider):
                 return tool_error("Missing required parameter: content")
             context = args.get("context")
             try:
-                _run_sync(client.aretain(
-                    bank_id=self._bank_id, content=content, context=context
-                ))
+                _run_sync(client.aretain(**self._build_retain_kwargs(content, context=context)))
                 return json.dumps({"result": "Memory stored successfully."})
             except Exception as e:
                 logger.warning("hindsight_retain failed: %s", e)
