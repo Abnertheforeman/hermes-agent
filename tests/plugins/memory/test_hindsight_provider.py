@@ -42,22 +42,28 @@ class FakeClient:
 
 
 def _make_provider(monkeypatch):
+    return _make_provider_with_config(monkeypatch, {})
+
+
+def _make_provider_with_config(monkeypatch, overrides):
+    config = {
+        "mode": "cloud",
+        "api_url": "http://example.local",
+        "bank_id": "josh-global",
+        "budget": "high",
+        "retain_tags": ["agent:abner", "source_system:hermes-agent"],
+        "retain_source": "hermes",
+        "retain_user_prefix": "User (Josh)",
+        "retain_assistant_prefix": "Assistant (Abner)",
+    }
+    config.update(overrides)
     monkeypatch.setattr(
         "plugins.memory.hindsight._load_config",
-        lambda: {
-            "mode": "cloud",
-            "api_url": "http://example.local",
-            "bank_id": "josh-global",
-            "budget": "high",
-            "retain_tags": ["agent:abner", "source_system:hermes-agent"],
-            "retain_source": "hermes",
-            "retain_user_prefix": "User (Josh)",
-            "retain_assistant_prefix": "Assistant (Abner)",
-        },
+        lambda: config,
     )
     monkeypatch.setattr("plugins.memory.hindsight._run_sync", lambda coro, timeout=120.0: asyncio.run(coro))
     provider = HindsightMemoryProvider()
-    provider.initialize("session-1")
+    provider.initialize("session-1", platform="discord", user_id="josh-123", agent_identity="abner")
     provider._client = FakeClient()
     return provider
 
@@ -83,6 +89,7 @@ def test_initialize_loads_retain_config(monkeypatch):
     assert provider._retain_assistant_prefix == "Assistant (Abner)"
 
 
+
 def test_get_config_schema_exposes_retain_knobs():
     provider = HindsightMemoryProvider()
     keys = {field["key"] for field in provider.get_config_schema()}
@@ -91,6 +98,9 @@ def test_get_config_schema_exposes_retain_knobs():
     assert "retain_source" in keys
     assert "retain_user_prefix" in keys
     assert "retain_assistant_prefix" in keys
+    assert "retain_chunk_every_n_turns" in keys
+    assert "retain_chunk_overlap_turns" in keys
+
 
 
 def test_sync_turn_applies_prefixes_tags_and_metadata(monkeypatch):
@@ -103,10 +113,50 @@ def test_sync_turn_applies_prefixes_tags_and_metadata(monkeypatch):
     call = provider._client.retain_calls[0]
     assert call["bank_id"] == "josh-global"
     assert call["context"] == "conversation"
+    assert call["document_id"] == "hermes:session-1:turn:000001"
     assert call["tags"] == ["agent:abner", "source_system:hermes-agent"]
     assert call["metadata"]["source"] == "hermes"
+    assert call["metadata"]["session_id"] == "session-1"
+    assert call["metadata"]["platform"] == "discord"
+    assert call["metadata"]["user_id"] == "josh-123"
+    assert call["metadata"]["agent_identity"] == "abner"
+    assert call["metadata"]["retention_scope"] == "turn"
+    assert call["metadata"]["turn_index"] == "1"
+    assert call["metadata"]["message_count"] == "2"
     assert re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z", call["metadata"]["retained_at"])
     assert call["content"] == "User (Josh): Need memory labels\nAssistant (Abner): Got it"
+
+
+
+def test_sync_turn_can_emit_periodic_conversation_windows(monkeypatch):
+    provider = _make_provider_with_config(
+        monkeypatch,
+        {
+            "retain_chunk_every_n_turns": 2,
+            "retain_chunk_overlap_turns": 1,
+        },
+    )
+
+    provider.sync_turn("Turn one user", "Turn one assistant")
+    provider._sync_thread.join(timeout=1)
+    provider.sync_turn("Turn two user", "Turn two assistant")
+    provider._sync_thread.join(timeout=1)
+
+    assert len(provider._client.retain_calls) == 3
+
+    first_turn, second_turn, window = provider._client.retain_calls
+    assert first_turn["document_id"] == "hermes:session-1:turn:000001"
+    assert second_turn["document_id"] == "hermes:session-1:turn:000002"
+    assert window["document_id"] == "hermes:session-1:window:000002"
+    assert window["context"] == "conversation_window"
+    assert window["metadata"]["retention_scope"] == "window"
+    assert window["metadata"]["window_turns"] == "2"
+    assert window["metadata"]["message_count"] == "4"
+    assert window["content"] == (
+        "User (Josh): Turn one user\nAssistant (Abner): Turn one assistant\n\n"
+        "User (Josh): Turn two user\nAssistant (Abner): Turn two assistant"
+    )
+
 
 
 def test_hindsight_retain_tool_uses_same_tags_and_metadata(monkeypatch):
@@ -121,4 +171,8 @@ def test_hindsight_retain_tool_uses_same_tags_and_metadata(monkeypatch):
     assert call["context"] == "user preference"
     assert call["tags"] == ["agent:abner", "source_system:hermes-agent"]
     assert call["metadata"]["source"] == "hermes"
+    assert call["metadata"]["session_id"] == "session-1"
+    assert call["metadata"]["platform"] == "discord"
+    assert call["metadata"]["user_id"] == "josh-123"
+    assert call["metadata"]["agent_identity"] == "abner"
     assert re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z", call["metadata"]["retained_at"])

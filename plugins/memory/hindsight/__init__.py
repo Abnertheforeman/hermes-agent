@@ -173,6 +173,8 @@ def _load_config() -> dict:
         "retain_source": os.environ.get("HINDSIGHT_RETAIN_SOURCE", ""),
         "retain_user_prefix": os.environ.get("HINDSIGHT_RETAIN_USER_PREFIX", "User"),
         "retain_assistant_prefix": os.environ.get("HINDSIGHT_RETAIN_ASSISTANT_PREFIX", "Assistant"),
+        "retain_chunk_every_n_turns": os.environ.get("HINDSIGHT_RETAIN_CHUNK_EVERY_N_TURNS", "0"),
+        "retain_chunk_overlap_turns": os.environ.get("HINDSIGHT_RETAIN_CHUNK_OVERLAP_TURNS", "0"),
         "banks": {
             "hermes": {
                 "bankId": os.environ.get("HINDSIGHT_BANK_ID", "hermes"),
@@ -225,6 +227,15 @@ def _utc_timestamp() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
 
 
+def _normalize_nonnegative_int(value: Any, default: int = 0) -> int:
+    """Coerce *value* to a non-negative integer with fallback to *default*."""
+    try:
+        normalized = int(value)
+    except (TypeError, ValueError):
+        return default
+    return normalized if normalized >= 0 else default
+
+
 # ---------------------------------------------------------------------------
 # MemoryProvider implementation
 # ---------------------------------------------------------------------------
@@ -245,6 +256,14 @@ class HindsightMemoryProvider(MemoryProvider):
         self._retain_source = ""
         self._retain_user_prefix = "User"
         self._retain_assistant_prefix = "Assistant"
+        self._retain_chunk_every_n_turns = 0
+        self._retain_chunk_overlap_turns = 0
+        self._session_id = ""
+        self._platform = ""
+        self._user_id = ""
+        self._agent_identity = ""
+        self._turn_index = 0
+        self._turn_history: List[Dict[str, str]] = []
         self._client = None
         self._prefetch_result = ""
         self._prefetch_lock = threading.Lock()
@@ -299,6 +318,8 @@ class HindsightMemoryProvider(MemoryProvider):
             {"key": "retain_source", "description": "Metadata source value attached to retained memories", "default": ""},
             {"key": "retain_user_prefix", "description": "Label used before user turns in retained transcripts", "default": "User"},
             {"key": "retain_assistant_prefix", "description": "Label used before assistant turns in retained transcripts", "default": "Assistant"},
+            {"key": "retain_chunk_every_n_turns", "description": "Also retain a sliding conversation window every N turns (0 disables)", "default": 0},
+            {"key": "retain_chunk_overlap_turns", "description": "Extra prior turns included in chunked conversation windows", "default": 0},
         ]
 
     def _get_client(self):
@@ -326,6 +347,12 @@ class HindsightMemoryProvider(MemoryProvider):
 
     def initialize(self, session_id: str, **kwargs) -> None:
         self._config = _load_config()
+        self._session_id = str(session_id or "").strip()
+        self._platform = str(kwargs.get("platform") or "").strip()
+        self._user_id = str(kwargs.get("user_id") or "").strip()
+        self._agent_identity = str(kwargs.get("agent_identity") or "").strip()
+        self._turn_index = 0
+        self._turn_history = []
         self._mode = self._config.get("mode", "cloud")
         self._api_key = self._config.get("apiKey") or os.environ.get("HINDSIGHT_API_KEY", "")
         default_url = _DEFAULT_LOCAL_URL if self._mode == "local" else _DEFAULT_API_URL
@@ -354,9 +381,21 @@ class HindsightMemoryProvider(MemoryProvider):
         self._retain_assistant_prefix = str(
             self._config.get("retain_assistant_prefix") or os.environ.get("HINDSIGHT_RETAIN_ASSISTANT_PREFIX", "Assistant")
         ).strip() or "Assistant"
+        self._retain_chunk_every_n_turns = _normalize_nonnegative_int(
+            self._config.get("retain_chunk_every_n_turns")
+            or os.environ.get("HINDSIGHT_RETAIN_CHUNK_EVERY_N_TURNS", "0"),
+            default=0,
+        )
+        if self._retain_chunk_every_n_turns < 2:
+            self._retain_chunk_every_n_turns = 0
+        self._retain_chunk_overlap_turns = _normalize_nonnegative_int(
+            self._config.get("retain_chunk_overlap_turns")
+            or os.environ.get("HINDSIGHT_RETAIN_CHUNK_OVERLAP_TURNS", "0"),
+            default=0,
+        )
 
         logger.info(
-            "Hindsight initialized: mode=%s, api_url=%s, bank=%s, budget=%s, memory_mode=%s, prefetch_method=%s, retain_tags=%s, retain_source=%s",
+            "Hindsight initialized: mode=%s, api_url=%s, bank=%s, budget=%s, memory_mode=%s, prefetch_method=%s, retain_tags=%s, retain_source=%s, retain_chunk_every_n_turns=%s, retain_chunk_overlap_turns=%s",
             self._mode,
             self._api_url,
             self._bank_id,
@@ -365,6 +404,8 @@ class HindsightMemoryProvider(MemoryProvider):
             self._prefetch_method,
             self._retain_tags,
             self._retain_source,
+            self._retain_chunk_every_n_turns,
+            self._retain_chunk_overlap_turns,
         )
 
         # For local mode, start the embedded daemon in the background so it
@@ -494,28 +535,111 @@ class HindsightMemoryProvider(MemoryProvider):
             f"{self._retain_assistant_prefix}: {assistant_content}"
         )
 
-    def _build_retain_kwargs(self, content: str, *, context: str | None = None) -> Dict[str, Any]:
+    def _build_chunk_content(self, turns: List[Dict[str, str]]) -> str:
+        return "\n\n".join(
+            self._build_turn_content(turn["user"], turn["assistant"])
+            for turn in turns
+            if turn.get("user") or turn.get("assistant")
+        )
+
+    def _build_metadata(self, *, scope: str, message_count: int, turn_index: int, window_turns: int | None = None) -> Dict[str, str]:
+        metadata: Dict[str, str] = {
+            "retained_at": _utc_timestamp(),
+            "message_count": str(message_count),
+            "retention_scope": scope,
+            "turn_index": str(turn_index),
+        }
+        if self._retain_source:
+            metadata["source"] = self._retain_source
+        if self._session_id:
+            metadata["session_id"] = self._session_id
+        if self._platform:
+            metadata["platform"] = self._platform
+        if self._user_id:
+            metadata["user_id"] = self._user_id
+        if self._agent_identity:
+            metadata["agent_identity"] = self._agent_identity
+        if window_turns is not None:
+            metadata["window_turns"] = str(window_turns)
+        return metadata
+
+    def _turn_document_id(self, turn_index: int) -> str:
+        base = self._session_id or "session"
+        return f"hermes:{base}:turn:{turn_index:06d}"
+
+    def _chunk_document_id(self, turn_index: int) -> str:
+        base = self._session_id or "session"
+        return f"hermes:{base}:window:{turn_index:06d}"
+
+    def _build_retain_kwargs(
+        self,
+        content: str,
+        *,
+        context: str | None = None,
+        document_id: str | None = None,
+        metadata: Dict[str, str] | None = None,
+    ) -> Dict[str, Any]:
         kwargs: Dict[str, Any] = {
             "bank_id": self._bank_id,
             "content": content,
-            "metadata": {"retained_at": _utc_timestamp()},
+            "metadata": metadata or self._build_metadata(
+                scope="manual",
+                message_count=1,
+                turn_index=self._turn_index,
+            ),
         }
         if context is not None:
             kwargs["context"] = context
-        if self._retain_source:
-            kwargs["metadata"]["source"] = self._retain_source
+        if document_id:
+            kwargs["document_id"] = document_id
         if self._retain_tags:
             kwargs["tags"] = self._retain_tags
         return kwargs
 
     def sync_turn(self, user_content: str, assistant_content: str, *, session_id: str = "") -> None:
         """Retain conversation turn in background (non-blocking)."""
+        if session_id:
+            self._session_id = str(session_id).strip()
+        self._turn_index += 1
+        self._turn_history.append({"user": user_content, "assistant": assistant_content})
+        max_window_turns = max(1, self._retain_chunk_every_n_turns + self._retain_chunk_overlap_turns)
+        if len(self._turn_history) > max_window_turns:
+            self._turn_history = self._turn_history[-max_window_turns:]
+
+        current_turn_index = self._turn_index
         combined = self._build_turn_content(user_content, assistant_content)
+        chunk_turns: List[Dict[str, str]] = []
+        if self._retain_chunk_every_n_turns and current_turn_index % self._retain_chunk_every_n_turns == 0:
+            window_turns = self._retain_chunk_every_n_turns + self._retain_chunk_overlap_turns
+            chunk_turns = self._turn_history[-window_turns:]
 
         def _sync():
             try:
                 client = self._get_client()
-                _run_sync(client.aretain(**self._build_retain_kwargs(combined, context="conversation")))
+                _run_sync(client.aretain(**self._build_retain_kwargs(
+                    combined,
+                    context="conversation",
+                    document_id=self._turn_document_id(current_turn_index),
+                    metadata=self._build_metadata(
+                        scope="turn",
+                        message_count=2,
+                        turn_index=current_turn_index,
+                    ),
+                )))
+                if chunk_turns:
+                    chunk_content = self._build_chunk_content(chunk_turns)
+                    if chunk_content:
+                        _run_sync(client.aretain(**self._build_retain_kwargs(
+                            chunk_content,
+                            context="conversation_window",
+                            document_id=self._chunk_document_id(current_turn_index),
+                            metadata=self._build_metadata(
+                                scope="window",
+                                message_count=len(chunk_turns) * 2,
+                                turn_index=current_turn_index,
+                                window_turns=len(chunk_turns),
+                            ),
+                        )))
             except Exception as e:
                 logger.warning("Hindsight sync failed: %s", e)
 

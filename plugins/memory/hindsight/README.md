@@ -57,6 +57,12 @@ Config file: `~/.hermes/hindsight/config.json`
 |-----|---------|-------------|
 | `memory_mode` | `hybrid` | How memories are integrated into the agent |
 | `prefetch_method` | `recall` | Method for automatic context injection |
+| `retain_tags` | `[]` | Tags attached to retained documents |
+| `retain_source` | `""` | `metadata.source` value attached to retained documents |
+| `retain_user_prefix` | `User` | Label used before user turns in retained transcripts |
+| `retain_assistant_prefix` | `Assistant` | Label used before assistant turns in retained transcripts |
+| `retain_chunk_every_n_turns` | `0` | Also retain a sliding conversation window every N turns (`0` disables) |
+| `retain_chunk_overlap_turns` | `0` | Extra prior turns included in chunked conversation windows |
 
 **memory_mode:**
 - `hybrid` — automatic context injection + tools available to the LLM
@@ -66,6 +72,10 @@ Config file: `~/.hermes/hindsight/config.json`
 **prefetch_method:**
 - `recall` — injects raw memory facts (fast)
 - `reflect` — injects LLM-synthesized summary (slower, more coherent)
+
+**auto-retain behavior:**
+- Every turn is retained immediately as its own document with metadata such as `session_id`, `platform`, `user_id`, `agent_identity`, `turn_index`, and `retained_at`.
+- If `retain_chunk_every_n_turns` is set to `2` or higher, Hermes also emits periodic sliding-window documents with context `conversation_window` so Hindsight can see more local conversation context without re-uploading the full session on every turn.
 
 ### Local Mode LLM
 
@@ -96,3 +106,9 @@ Available in `hybrid` and `tools` memory modes:
 | `HINDSIGHT_BANK_ID` | Override bank name |
 | `HINDSIGHT_BUDGET` | Override recall budget |
 | `HINDSIGHT_MODE` | Override mode (`cloud` / `local`) |
+| `HINDSIGHT_RETAIN_TAGS` | Comma-separated tags applied to retained documents |
+| `HINDSIGHT_RETAIN_SOURCE` | Value written to `metadata.source` |
+| `HINDSIGHT_RETAIN_USER_PREFIX` | Label used before user turns in retained transcripts |
+| `HINDSIGHT_RETAIN_ASSISTANT_PREFIX` | Label used before assistant turns in retained transcripts |
+| `HINDSIGHT_RETAIN_CHUNK_EVERY_N_TURNS` | Also retain a sliding conversation window every N turns (`0` disables) |
+| `HINDSIGHT_RETAIN_CHUNK_OVERLAP_TURNS` | Extra prior turns included in chunked conversation windows |
