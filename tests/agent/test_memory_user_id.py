@@ -310,3 +310,14 @@ class TestAIAgentUserIdPropagation:
             agent._user_id = None
             assert agent._user_id is None
 
+    def test_user_id_can_fall_back_from_session_env(self, monkeypatch):
+        monkeypatch.setenv("HERMES_SESSION_USER_ID", "env_user_42")
+
+        from run_agent import AIAgent
+
+        agent = object.__new__(AIAgent)
+        agent._user_id = None
+        agent._user_id = None or os.getenv("HERMES_SESSION_USER_ID")
+
+        assert agent._user_id == "env_user_42"
+

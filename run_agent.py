@@ -548,7 +548,7 @@ class AIAgent:
         self.quiet_mode = quiet_mode
         self.ephemeral_system_prompt = ephemeral_system_prompt
         self.platform = platform  # "cli", "telegram", "discord", "whatsapp", etc.
-        self._user_id = user_id  # Platform user identifier (gateway sessions)
+        self._user_id = user_id or os.getenv("HERMES_SESSION_USER_ID")  # Platform user identifier (gateway sessions)
         self._user_name = user_name or os.getenv("HERMES_SESSION_USER_NAME")
         self._chat_id = chat_id or os.getenv("HERMES_SESSION_CHAT_ID")
         self._chat_name = chat_name or os.getenv("HERMES_SESSION_CHAT_NAME")
