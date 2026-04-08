@@ -4583,6 +4583,11 @@ class GatewayRunner:
                     session_id=task_id,
                     platform=platform_key,
                     user_id=source.user_id,
+                    user_name=source.user_name,
+                    chat_id=source.chat_id,
+                    chat_name=source.chat_name,
+                    chat_type=source.chat_type,
+                    thread_id=source.thread_id,
                     session_db=self._session_db,
                     fallback_model=self._fallback_model,
                 )
@@ -5912,12 +5917,18 @@ class GatewayRunner:
         os.environ["HERMES_SESSION_CHAT_ID"] = context.source.chat_id
         if context.source.chat_name:
             os.environ["HERMES_SESSION_CHAT_NAME"] = context.source.chat_name
+        if context.source.chat_type:
+            os.environ["HERMES_SESSION_CHAT_TYPE"] = context.source.chat_type
+        if context.source.user_id:
+            os.environ["HERMES_SESSION_USER_ID"] = context.source.user_id
+        if context.source.user_name:
+            os.environ["HERMES_SESSION_USER_NAME"] = context.source.user_name
         if context.source.thread_id:
             os.environ["HERMES_SESSION_THREAD_ID"] = str(context.source.thread_id)
     
     def _clear_session_env(self) -> None:
         """Clear session environment variables."""
-        for var in ["HERMES_SESSION_PLATFORM", "HERMES_SESSION_CHAT_ID", "HERMES_SESSION_CHAT_NAME", "HERMES_SESSION_THREAD_ID"]:
+        for var in ["HERMES_SESSION_PLATFORM", "HERMES_SESSION_CHAT_ID", "HERMES_SESSION_CHAT_NAME", "HERMES_SESSION_CHAT_TYPE", "HERMES_SESSION_USER_ID", "HERMES_SESSION_USER_NAME", "HERMES_SESSION_THREAD_ID"]:
             if var in os.environ:
                 del os.environ[var]
     
@@ -6688,6 +6699,11 @@ class GatewayRunner:
                     session_id=session_id,
                     platform=platform_key,
                     user_id=source.user_id,
+                    user_name=source.user_name,
+                    chat_id=source.chat_id,
+                    chat_name=source.chat_name,
+                    chat_type=source.chat_type,
+                    thread_id=source.thread_id,
                     session_db=self._session_db,
                     fallback_model=self._fallback_model,
                 )

@@ -63,7 +63,17 @@ def _make_provider_with_config(monkeypatch, overrides):
     )
     monkeypatch.setattr("plugins.memory.hindsight._run_sync", lambda coro, timeout=120.0: asyncio.run(coro))
     provider = HindsightMemoryProvider()
-    provider.initialize("session-1", platform="discord", user_id="josh-123", agent_identity="abner")
+    provider.initialize(
+        "session-1",
+        platform="discord",
+        user_id="josh-123",
+        user_name="Josh",
+        chat_id="1485316232612941897",
+        chat_name="abner-forums",
+        chat_type="thread",
+        thread_id="1491249007475949698",
+        agent_identity="abner",
+    )
     provider._client = FakeClient()
     return provider
 
@@ -119,6 +129,11 @@ def test_sync_turn_applies_prefixes_tags_and_metadata(monkeypatch):
     assert call["metadata"]["session_id"] == "session-1"
     assert call["metadata"]["platform"] == "discord"
     assert call["metadata"]["user_id"] == "josh-123"
+    assert call["metadata"]["user_name"] == "Josh"
+    assert call["metadata"]["chat_id"] == "1485316232612941897"
+    assert call["metadata"]["chat_name"] == "abner-forums"
+    assert call["metadata"]["chat_type"] == "thread"
+    assert call["metadata"]["thread_id"] == "1491249007475949698"
     assert call["metadata"]["agent_identity"] == "abner"
     assert call["metadata"]["retention_scope"] == "turn"
     assert call["metadata"]["turn_index"] == "1"
@@ -174,5 +189,10 @@ def test_hindsight_retain_tool_uses_same_tags_and_metadata(monkeypatch):
     assert call["metadata"]["session_id"] == "session-1"
     assert call["metadata"]["platform"] == "discord"
     assert call["metadata"]["user_id"] == "josh-123"
+    assert call["metadata"]["user_name"] == "Josh"
+    assert call["metadata"]["chat_id"] == "1485316232612941897"
+    assert call["metadata"]["chat_name"] == "abner-forums"
+    assert call["metadata"]["chat_type"] == "thread"
+    assert call["metadata"]["thread_id"] == "1491249007475949698"
     assert call["metadata"]["agent_identity"] == "abner"
     assert re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z", call["metadata"]["retained_at"])

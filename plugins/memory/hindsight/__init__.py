@@ -261,6 +261,11 @@ class HindsightMemoryProvider(MemoryProvider):
         self._session_id = ""
         self._platform = ""
         self._user_id = ""
+        self._user_name = ""
+        self._chat_id = ""
+        self._chat_name = ""
+        self._chat_type = ""
+        self._thread_id = ""
         self._agent_identity = ""
         self._turn_index = 0
         self._turn_history: List[Dict[str, str]] = []
@@ -350,6 +355,11 @@ class HindsightMemoryProvider(MemoryProvider):
         self._session_id = str(session_id or "").strip()
         self._platform = str(kwargs.get("platform") or "").strip()
         self._user_id = str(kwargs.get("user_id") or "").strip()
+        self._user_name = str(kwargs.get("user_name") or "").strip()
+        self._chat_id = str(kwargs.get("chat_id") or "").strip()
+        self._chat_name = str(kwargs.get("chat_name") or "").strip()
+        self._chat_type = str(kwargs.get("chat_type") or "").strip()
+        self._thread_id = str(kwargs.get("thread_id") or "").strip()
         self._agent_identity = str(kwargs.get("agent_identity") or "").strip()
         self._turn_index = 0
         self._turn_history = []
@@ -557,6 +567,16 @@ class HindsightMemoryProvider(MemoryProvider):
             metadata["platform"] = self._platform
         if self._user_id:
             metadata["user_id"] = self._user_id
+        if self._user_name:
+            metadata["user_name"] = self._user_name
+        if self._chat_id:
+            metadata["chat_id"] = self._chat_id
+        if self._chat_name:
+            metadata["chat_name"] = self._chat_name
+        if self._chat_type:
+            metadata["chat_type"] = self._chat_type
+        if self._thread_id:
+            metadata["thread_id"] = self._thread_id
         if self._agent_identity:
             metadata["agent_identity"] = self._agent_identity
         if window_turns is not None:

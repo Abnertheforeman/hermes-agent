@@ -473,6 +473,11 @@ class AIAgent:
         prefill_messages: List[Dict[str, Any]] = None,
         platform: str = None,
         user_id: str = None,
+        user_name: str = None,
+        chat_id: str = None,
+        chat_name: str = None,
+        chat_type: str = None,
+        thread_id: str = None,
         skip_context_files: bool = False,
         skip_memory: bool = False,
         session_db=None,
@@ -520,6 +525,12 @@ class AIAgent:
                 Example: [{"role": "user", "content": "Hi!"}, {"role": "assistant", "content": "Hello!"}]
             platform (str): The interface platform the user is on (e.g. "cli", "telegram", "discord", "whatsapp").
                 Used to inject platform-specific formatting hints into the system prompt.
+            user_id (str): Platform user identifier for the current session, when available.
+            user_name (str): Human-readable sender name for the current session, when available.
+            chat_id (str): Platform chat/channel identifier for the current session, when available.
+            chat_name (str): Human-readable chat/channel name for the current session, when available.
+            chat_type (str): Session surface type like dm/group/channel/thread, when available.
+            thread_id (str): Platform thread/topic identifier for the current session, when available.
             skip_context_files (bool): If True, skip auto-injection of SOUL.md, AGENTS.md, and .cursorrules
                 into the system prompt. Use this for batch processing and data generation to avoid
                 polluting trajectories with user-specific persona or project instructions.
@@ -538,6 +549,11 @@ class AIAgent:
         self.ephemeral_system_prompt = ephemeral_system_prompt
         self.platform = platform  # "cli", "telegram", "discord", "whatsapp", etc.
         self._user_id = user_id  # Platform user identifier (gateway sessions)
+        self._user_name = user_name or os.getenv("HERMES_SESSION_USER_NAME")
+        self._chat_id = chat_id or os.getenv("HERMES_SESSION_CHAT_ID")
+        self._chat_name = chat_name or os.getenv("HERMES_SESSION_CHAT_NAME")
+        self._chat_type = chat_type or os.getenv("HERMES_SESSION_CHAT_TYPE")
+        self._thread_id = thread_id or os.getenv("HERMES_SESSION_THREAD_ID")
         # Pluggable print function — CLI replaces this with _cprint so that
         # raw ANSI status lines are routed through prompt_toolkit's renderer
         # instead of going directly to stdout where patch_stdout's StdoutProxy
@@ -1043,6 +1059,16 @@ class AIAgent:
                         # Thread gateway user identity for per-user memory scoping
                         if self._user_id:
                             _init_kwargs["user_id"] = self._user_id
+                        if self._user_name:
+                            _init_kwargs["user_name"] = self._user_name
+                        if self._chat_id:
+                            _init_kwargs["chat_id"] = self._chat_id
+                        if self._chat_name:
+                            _init_kwargs["chat_name"] = self._chat_name
+                        if self._chat_type:
+                            _init_kwargs["chat_type"] = self._chat_type
+                        if self._thread_id:
+                            _init_kwargs["thread_id"] = self._thread_id
                         # Profile identity for per-profile provider scoping
                         try:
                             from hermes_cli.profiles import get_active_profile_name
