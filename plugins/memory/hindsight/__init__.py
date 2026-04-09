@@ -291,6 +291,7 @@ class HindsightMemoryProvider(MemoryProvider):
         # Retain controls
         self._auto_retain = True
         self._retain_every_n_turns = 1
+        self._retain_async = True
         self._retain_context = "conversation between Hermes Agent and the User"
         self._turn_counter = 0
         self._session_turns: list[str] = []  # accumulates ALL turns for the session
@@ -513,6 +514,7 @@ class HindsightMemoryProvider(MemoryProvider):
             {"key": "auto_recall", "description": "Automatically recall memories before each turn", "default": True},
             {"key": "auto_retain", "description": "Automatically retain conversation turns", "default": True},
             {"key": "retain_every_n_turns", "description": "Retain every N turns (1 = every turn)", "default": 1},
+            {"key": "retain_async","description": "Process retain asynchronously on the Hindsight server", "default": True},
             {"key": "retain_context", "description": "Context label for retained memories", "default": "conversation between Hermes Agent and the User"},
             {"key": "recall_max_tokens", "description": "Maximum tokens for recall results", "default": 4096},
             {"key": "recall_max_input_chars", "description": "Maximum input query length for auto-recall", "default": 800},
@@ -656,6 +658,7 @@ class HindsightMemoryProvider(MemoryProvider):
         self._recall_types = self._config.get("recall_types") or None
         self._recall_prompt_preamble = self._config.get("recall_prompt_preamble", "")
         self._recall_max_input_chars = int(self._config.get("recall_max_input_chars", 800))
+        self._retain_async = self._config.get("retain_async", True)
 
         _client_version = "unknown"
         try:
@@ -666,9 +669,9 @@ class HindsightMemoryProvider(MemoryProvider):
         logger.info("Hindsight initialized: mode=%s, api_url=%s, bank=%s, budget=%s, memory_mode=%s, prefetch_method=%s, client=%s",
                      self._mode, self._api_url, self._bank_id, self._budget, self._memory_mode, self._prefetch_method, _client_version)
         logger.debug("Hindsight config: auto_retain=%s, auto_recall=%s, retain_every_n=%d, "
-                     "retain_context=%s, recall_max_tokens=%d, recall_max_input_chars=%d, tags=%s, recall_tags=%s",
+                     "retain_async=%s, retain_context=%s, recall_max_tokens=%d, recall_max_input_chars=%d, tags=%s, recall_tags=%s",
                      self._auto_retain, self._auto_recall, self._retain_every_n_turns,
-                     self._retain_context, self._recall_max_tokens, self._recall_max_input_chars,
+                     self._retain_async, self._retain_context, self._recall_max_tokens, self._recall_max_input_chars,
                      self._tags, self._recall_tags)
 
         # For local mode, start the embedded daemon in the background so it
@@ -923,6 +926,7 @@ class HindsightMemoryProvider(MemoryProvider):
         document_id: str | None = None,
         metadata: Dict[str, str] | None = None,
         tags: List[str] | None = None,
+        retain_async: bool | None = None,
     ) -> Dict[str, Any]:
         kwargs: Dict[str, Any] = {
             "bank_id": self._bank_id,
@@ -937,6 +941,8 @@ class HindsightMemoryProvider(MemoryProvider):
             kwargs["context"] = context
         if document_id:
             kwargs["document_id"] = document_id
+        if retain_async is not None:
+            kwargs["retain_async"] = retain_async
         merged_tags = _normalize_retain_tags(self._retain_tags)
         for tag in _normalize_retain_tags(tags):
             if tag not in merged_tags:
@@ -985,6 +991,7 @@ class HindsightMemoryProvider(MemoryProvider):
                         message_count=2,
                         turn_index=current_turn_index,
                     ),
+                    retain_async=self._retain_async,
                 )))
                 if chunk_turns:
                     chunk_content = self._build_chunk_content(chunk_turns)
@@ -999,6 +1006,7 @@ class HindsightMemoryProvider(MemoryProvider):
                                 turn_index=current_turn_index,
                                 window_turns=len(chunk_turns),
                             ),
+                            retain_async=self._retain_async,
                         )))
             except Exception as e:
                 logger.warning("Hindsight sync failed: %s", e, exc_info=True)

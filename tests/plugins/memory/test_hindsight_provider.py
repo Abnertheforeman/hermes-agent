@@ -53,6 +53,7 @@ def _make_mock_client():
         entities=None,
         tags=None,
         update_mode=None,
+        retain_async=None,
     ):
         return SimpleNamespace(ok=True)
 
@@ -531,6 +532,7 @@ class TestSyncTurn:
             "budget": "mid",
             "memory_mode": "hybrid",
             "retain_chunk_every_n_turns": 2,
+            "retain_async": False,
             "retain_user_prefix": "User (Josh)",
             "retain_assistant_prefix": "Assistant (Abner)",
         }
@@ -560,7 +562,9 @@ class TestSyncTurn:
         second_turn = p._client.aretain.call_args_list[0].kwargs
         window = p._client.aretain.call_args_list[1].kwargs
         assert second_turn["document_id"] == "hermes:test-session:turn:000002"
+        assert second_turn["retain_async"] is False
         assert window["document_id"] == "hermes:test-session:window:000002"
+        assert window["retain_async"] is False
         assert window["content"] == (
             "User (Josh): turn1-user\nAssistant (Abner): turn1-final\n\n"
             "User (Josh): turn2-user\nAssistant (Abner): turn2-final"
@@ -593,6 +597,7 @@ class TestSyncTurn:
         call_kwargs = p._client.aretain.call_args.kwargs
         assert call_kwargs["context"] == "conversation between Hermes Agent and the User"
         assert call_kwargs["document_id"] == "hermes:session-1:turn:000001"
+        assert call_kwargs["retain_async"] is True
         assert call_kwargs["tags"] == ["conv", "session1"]
         assert call_kwargs["content"] == "User (Josh): hello\nAssistant (Abner): hi there"
         assert call_kwargs["metadata"]["source"] == "hermes"
@@ -617,7 +622,7 @@ class TestSyncTurn:
         p._client.aretain.assert_not_called()
 
     def test_sync_turn_every_n_turns(self, provider_with_config):
-        p = provider_with_config(retain_every_n_turns=3)
+        p = provider_with_config(retain_every_n_turns=3, retain_async=False)
         p.sync_turn("turn1-user", "turn1-asst")
         assert p._sync_thread is None
         p.sync_turn("turn2-user", "turn2-asst")
@@ -627,6 +632,7 @@ class TestSyncTurn:
         p._client.aretain.assert_called_once()
         call_kwargs = p._client.aretain.call_args.kwargs
         assert call_kwargs["document_id"] == "hermes:test-session:turn:000003"
+        assert call_kwargs["retain_async"] is False
         assert "turn3-user" in call_kwargs["content"]
 
     def test_sync_turn_emits_periodic_conversation_windows(self, provider_with_config):
@@ -708,7 +714,7 @@ class TestConfigSchema:
             "retain_chunk_every_n_turns",
             "recall_tags", "recall_tags_match",
             "auto_recall", "auto_retain",
-            "retain_every_n_turns", "retain_context",
+            "retain_every_n_turns", "retain_async", "retain_context",
             "recall_max_tokens", "recall_max_input_chars",
             "recall_prompt_preamble",
         }
