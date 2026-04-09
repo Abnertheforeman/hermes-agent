@@ -74,6 +74,14 @@ def _make_mock_client():
     return client
 
 
+class _FakeSessionDB:
+    def __init__(self, messages=None):
+        self._messages = list(messages or [])
+
+    def get_messages_as_conversation(self, session_id):
+        return list(self._messages)
+
+
 @pytest.fixture()
 def provider(tmp_path, monkeypatch):
     """Create an initialized HindsightMemoryProvider with a mock client."""
@@ -438,6 +446,126 @@ class TestPrefetch:
 
 
 class TestSyncTurn:
+    def test_initialize_restores_turn_state_from_session_history(self, tmp_path, monkeypatch):
+        config = {
+            "mode": "cloud",
+            "apiKey": "***",
+            "api_url": "http://localhost:9999",
+            "bank_id": "test-bank",
+            "budget": "mid",
+            "memory_mode": "hybrid",
+            "retain_chunk_every_n_turns": 2,
+        }
+        config_path = tmp_path / "hindsight" / "config.json"
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        config_path.write_text(json.dumps(config))
+        monkeypatch.setattr("plugins.memory.hindsight.get_hermes_home", lambda: tmp_path)
+
+        session_db = _FakeSessionDB([
+            {"role": "user", "content": "turn1-user"},
+            {"role": "assistant", "content": "turn1-tool-plan"},
+            {"role": "tool", "content": "tool output"},
+            {"role": "assistant", "content": "turn1-final"},
+            {"role": "user", "content": "turn2-user"},
+            {"role": "assistant", "content": "turn2-final"},
+        ])
+
+        p = HindsightMemoryProvider()
+        p.initialize(
+            session_id="test-session",
+            hermes_home=str(tmp_path),
+            platform="cli",
+            session_db=session_db,
+        )
+
+        assert p._turn_index == 2
+        assert p._turn_counter == 2
+        assert p._turn_history == [
+            {"user": "turn1-user", "assistant": "turn1-final"},
+            {"user": "turn2-user", "assistant": "turn2-final"},
+        ]
+
+    def test_sync_turn_resumes_turn_numbering_from_session_history(self, tmp_path, monkeypatch):
+        config = {
+            "mode": "cloud",
+            "apiKey": "***",
+            "api_url": "http://localhost:9999",
+            "bank_id": "test-bank",
+            "budget": "mid",
+            "memory_mode": "hybrid",
+        }
+        config_path = tmp_path / "hindsight" / "config.json"
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        config_path.write_text(json.dumps(config))
+        monkeypatch.setattr("plugins.memory.hindsight.get_hermes_home", lambda: tmp_path)
+
+        session_db = _FakeSessionDB([
+            {"role": "user", "content": "turn1-user"},
+            {"role": "assistant", "content": "turn1-final"},
+            {"role": "user", "content": "turn2-user"},
+            {"role": "assistant", "content": "turn2-final"},
+        ])
+
+        p = HindsightMemoryProvider()
+        p.initialize(
+            session_id="test-session",
+            hermes_home=str(tmp_path),
+            platform="cli",
+            session_db=session_db,
+        )
+        p._client = _make_mock_client()
+
+        p.sync_turn("turn3-user", "turn3-final")
+        p._sync_thread.join(timeout=5.0)
+
+        call_kwargs = p._client.aretain.call_args.kwargs
+        assert call_kwargs["document_id"] == "hermes:test-session:turn:000003"
+        assert call_kwargs["metadata"]["turn_index"] == "3"
+
+    def test_sync_turn_resumed_chunk_window_uses_restored_history(self, tmp_path, monkeypatch):
+        config = {
+            "mode": "cloud",
+            "apiKey": "***",
+            "api_url": "http://localhost:9999",
+            "bank_id": "test-bank",
+            "budget": "mid",
+            "memory_mode": "hybrid",
+            "retain_chunk_every_n_turns": 2,
+            "retain_user_prefix": "User (Josh)",
+            "retain_assistant_prefix": "Assistant (Abner)",
+        }
+        config_path = tmp_path / "hindsight" / "config.json"
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        config_path.write_text(json.dumps(config))
+        monkeypatch.setattr("plugins.memory.hindsight.get_hermes_home", lambda: tmp_path)
+
+        session_db = _FakeSessionDB([
+            {"role": "user", "content": "turn1-user"},
+            {"role": "assistant", "content": "turn1-final"},
+        ])
+
+        p = HindsightMemoryProvider()
+        p.initialize(
+            session_id="test-session",
+            hermes_home=str(tmp_path),
+            platform="cli",
+            session_db=session_db,
+        )
+        p._client = _make_mock_client()
+
+        p.sync_turn("turn2-user", "turn2-final")
+        p._sync_thread.join(timeout=5.0)
+
+        assert p._client.aretain.call_count == 2
+        second_turn = p._client.aretain.call_args_list[0].kwargs
+        window = p._client.aretain.call_args_list[1].kwargs
+        assert second_turn["document_id"] == "hermes:test-session:turn:000002"
+        assert window["document_id"] == "hermes:test-session:window:000002"
+        assert window["content"] == (
+            "User (Josh): turn1-user\nAssistant (Abner): turn1-final\n\n"
+            "User (Josh): turn2-user\nAssistant (Abner): turn2-final"
+        )
+
     def test_sync_turn_retains_metadata_rich_turn(self, provider_with_config):
         p = provider_with_config(
             retain_tags=["conv", "session1"],

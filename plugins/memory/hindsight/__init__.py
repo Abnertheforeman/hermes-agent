@@ -281,6 +281,7 @@ class HindsightMemoryProvider(MemoryProvider):
         self._prefetch_thread = None
         self._sync_thread = None
         self._session_id = ""
+        self._session_db = None
 
         # Tags
         self._tags: list[str] | None = None
@@ -576,9 +577,10 @@ class HindsightMemoryProvider(MemoryProvider):
                     logger.warning("uv not found. Run: pip install 'hindsight-client>=%s'", _MIN_CLIENT_VERSION)
         except Exception:
             pass  # packaging not available or other issue — proceed anyway
-
+    def initialize(self, session_id: str, **kwargs) -> None:
         self._config = _load_config()
         self._session_id = str(session_id or "").strip()
+        self._session_db = kwargs.get("session_db")
         self._platform = str(kwargs.get("platform") or "").strip()
         self._user_id = str(kwargs.get("user_id") or "").strip()
         self._user_name = str(kwargs.get("user_name") or "").strip()
@@ -637,6 +639,11 @@ class HindsightMemoryProvider(MemoryProvider):
         )
         if self._retain_chunk_every_n_turns < 2:
             self._retain_chunk_every_n_turns = 0
+        restored_turns = self._load_persisted_turns()
+        self._turn_index = len(restored_turns)
+        self._turn_counter = self._turn_index
+        max_window_turns = max(1, self._retain_chunk_every_n_turns)
+        self._turn_history = restored_turns[-max_window_turns:]
 
         # Retain controls
         self._auto_retain = self._config.get("auto_retain", True)
@@ -834,6 +841,40 @@ class HindsightMemoryProvider(MemoryProvider):
             for turn in turns
             if turn.get("user") or turn.get("assistant")
         )
+
+    def _load_persisted_turns(self) -> List[Dict[str, str]]:
+        """Reconstruct completed turns from persisted session history.
+
+        This lets auto-retain resume stable turn numbering and chunk windows
+        after a process restart, instead of starting back at turn 1.
+        """
+        if not self._session_db or not self._session_id:
+            return []
+        try:
+            messages = self._session_db.get_messages_as_conversation(self._session_id)
+        except Exception:
+            logger.debug("Failed to load persisted conversation history for Hindsight retain", exc_info=True)
+            return []
+
+        turns: List[Dict[str, str]] = []
+        current: Dict[str, str] | None = None
+        for msg in messages or []:
+            if not isinstance(msg, dict):
+                continue
+            role = msg.get("role")
+            content = msg.get("content")
+            if role == "user":
+                if current and (current.get("user") or current.get("assistant")):
+                    turns.append(current)
+                current = {"user": str(content or ""), "assistant": ""}
+            elif role == "assistant" and current is not None:
+                text = str(content or "")
+                if text.strip():
+                    current["assistant"] = text
+
+        if current and (current.get("user") or current.get("assistant")):
+            turns.append(current)
+        return turns
 
     def _build_metadata(self, *, scope: str, message_count: int, turn_index: int, window_turns: int | None = None) -> Dict[str, str]:
         metadata: Dict[str, str] = {
