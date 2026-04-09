@@ -505,8 +505,7 @@ class HindsightMemoryProvider(MemoryProvider):
             {"key": "recall_budget", "description": "Recall thoroughness", "default": "mid", "choices": ["low", "mid", "high"]},
             {"key": "memory_mode", "description": "Memory integration mode", "default": "hybrid", "choices": ["hybrid", "context", "tools"]},
             {"key": "recall_prefetch_method", "description": "Auto-recall method", "default": "recall", "choices": ["recall", "reflect"]},
-            {"key": "tags", "description": "Tags applied when storing memories (comma-separated)", "default": ""},
-            {"key": "retain_tags", "description": "Legacy alias for retain tags (comma-separated)", "default": ""},
+            {"key": "retain_tags", "description": "Default tags applied to retained memories (comma-separated)", "default": ""},
             {"key": "retain_source", "description": "Metadata source value attached to retained memories", "default": ""},
             {"key": "retain_user_prefix", "description": "Label used before user turns in retained transcripts", "default": "User"},
             {"key": "retain_assistant_prefix", "description": "Label used before assistant turns in retained transcripts", "default": "Assistant"},
@@ -622,7 +621,6 @@ class HindsightMemoryProvider(MemoryProvider):
         # Tags
         self._retain_tags = _normalize_retain_tags(
             self._config.get("retain_tags")
-            or self._config.get("tags")
             or os.environ.get("HINDSIGHT_RETAIN_TAGS", "")
         )
         self._tags = self._retain_tags or None

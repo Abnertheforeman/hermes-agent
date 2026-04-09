@@ -84,8 +84,7 @@ Config file: `~/.hermes/hindsight/config.json`
 | `retain_async` | `true` | Process retain asynchronously on the Hindsight server |
 | `retain_every_n_turns` | `1` | Retain every N turns (1 = every turn) |
 | `retain_context` | `conversation between Hermes Agent and the User` | Context label for retained memories |
-| `tags` | — | Tags applied when storing memories |
-| `retain_tags` | — | Legacy alias for default retain tags; merged with per-call tool tags |
+| `retain_tags` | — | Default tags applied to retained memories; merged with per-call tool tags |
 | `retain_source` | — | Optional `metadata.source` attached to retained memories |
 | `retain_user_prefix` | `User` | Label used before user turns in retained transcripts |
 | `retain_assistant_prefix` | `Assistant` | Label used before assistant turns in retained transcripts |

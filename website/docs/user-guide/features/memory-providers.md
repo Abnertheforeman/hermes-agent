@@ -297,7 +297,7 @@ The setup wizard installs dependencies automatically and only installs what's ne
 | `auto_retain` | `true` | Automatically retain conversation turns |
 | `auto_recall` | `true` | Automatically recall memories before each turn |
 | `retain_async` | `true` | Process retain asynchronously on the server |
-| `tags` | — | Tags applied when storing memories |
+| `retain_tags` | — | Default tags applied to retained memories; merged with per-call tool tags |
 | `recall_tags` | — | Tags to filter on recall |
 
 See [plugin README](https://github.com/NousResearch/hermes-agent/blob/main/plugins/memory/hindsight/README.md) for the full configuration reference.

@@ -178,7 +178,7 @@ class TestConfig:
 
     def test_custom_config_values(self, provider_with_config):
         p = provider_with_config(
-            tags=["tag1", "tag2"],
+            retain_tags=["tag1", "tag2"],
             retain_source="hermes",
             retain_user_prefix="User (Josh)",
             retain_assistant_prefix="Assistant (Abner)",
@@ -251,13 +251,13 @@ class TestToolHandlers:
         assert call_kwargs["content"] == "user likes dark mode"
 
     def test_retain_with_tags(self, provider_with_config):
-        p = provider_with_config(tags=["pref", "ui"])
+        p = provider_with_config(retain_tags=["pref", "ui"])
         p.handle_tool_call("hindsight_retain", {"content": "likes dark mode"})
         call_kwargs = p._client.aretain.call_args.kwargs
         assert call_kwargs["tags"] == ["pref", "ui"]
 
     def test_retain_merges_per_call_tags_with_config_tags(self, provider_with_config):
-        p = provider_with_config(tags=["pref", "ui"])
+        p = provider_with_config(retain_tags=["pref", "ui"])
         p.handle_tool_call(
             "hindsight_retain",
             {"content": "likes dark mode", "tags": ["client:x", "ui"]},
@@ -429,7 +429,7 @@ class TestPrefetch:
 class TestSyncTurn:
     def test_sync_turn_retains_metadata_rich_turn(self, provider_with_config):
         p = provider_with_config(
-            tags=["conv", "session1"],
+            retain_tags=["conv", "session1"],
             retain_source="hermes",
             retain_user_prefix="User (Josh)",
             retain_assistant_prefix="Assistant (Abner)",
@@ -563,7 +563,7 @@ class TestConfigSchema:
             "mode", "api_url", "api_key", "llm_provider", "llm_api_key",
             "llm_model", "bank_id", "bank_mission", "bank_retain_mission",
             "recall_budget", "memory_mode", "recall_prefetch_method",
-            "tags", "retain_tags", "retain_source",
+            "retain_tags", "retain_source",
             "retain_user_prefix", "retain_assistant_prefix",
             "retain_chunk_every_n_turns", "retain_chunk_overlap_turns",
             "recall_tags", "recall_tags_match",
