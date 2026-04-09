@@ -88,8 +88,7 @@ Config file: `~/.hermes/hindsight/config.json`
 | `retain_source` | — | Optional `metadata.source` attached to retained memories |
 | `retain_user_prefix` | `User` | Label used before user turns in retained transcripts |
 | `retain_assistant_prefix` | `Assistant` | Label used before assistant turns in retained transcripts |
-| `retain_chunk_every_n_turns` | `0` | Also retain a sliding conversation window every N turns (`0` disables) |
-| `retain_chunk_overlap_turns` | `0` | Extra prior turns included in chunked conversation windows |
+| `retain_chunk_every_n_turns` | `0` | Also retain a sliding conversation window every N turns (`0` disables); each window includes the last N turns |
 
 ### Integration
 

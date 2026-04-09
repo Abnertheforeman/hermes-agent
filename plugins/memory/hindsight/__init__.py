@@ -182,7 +182,6 @@ def _load_config() -> dict:
         "retain_user_prefix": os.environ.get("HINDSIGHT_RETAIN_USER_PREFIX", "User"),
         "retain_assistant_prefix": os.environ.get("HINDSIGHT_RETAIN_ASSISTANT_PREFIX", "Assistant"),
         "retain_chunk_every_n_turns": os.environ.get("HINDSIGHT_RETAIN_CHUNK_EVERY_N_TURNS", "0"),
-        "retain_chunk_overlap_turns": os.environ.get("HINDSIGHT_RETAIN_CHUNK_OVERLAP_TURNS", "0"),
         "banks": {
             "hermes": {
                 "bankId": os.environ.get("HINDSIGHT_BANK_ID", "hermes"),
@@ -266,7 +265,6 @@ class HindsightMemoryProvider(MemoryProvider):
         self._retain_user_prefix = "User"
         self._retain_assistant_prefix = "Assistant"
         self._retain_chunk_every_n_turns = 0
-        self._retain_chunk_overlap_turns = 0
         self._platform = ""
         self._user_id = ""
         self._user_name = ""
@@ -510,7 +508,6 @@ class HindsightMemoryProvider(MemoryProvider):
             {"key": "retain_user_prefix", "description": "Label used before user turns in retained transcripts", "default": "User"},
             {"key": "retain_assistant_prefix", "description": "Label used before assistant turns in retained transcripts", "default": "Assistant"},
             {"key": "retain_chunk_every_n_turns", "description": "Also retain a sliding conversation window every N turns (0 disables)", "default": 0},
-            {"key": "retain_chunk_overlap_turns", "description": "Extra prior turns included in chunked conversation windows", "default": 0},
             {"key": "recall_tags", "description": "Tags to filter when searching memories (comma-separated)", "default": ""},
             {"key": "recall_tags_match", "description": "Tag matching mode for recall", "default": "any", "choices": ["any", "all", "any_strict", "all_strict"]},
             {"key": "auto_recall", "description": "Automatically recall memories before each turn", "default": True},
@@ -642,11 +639,6 @@ class HindsightMemoryProvider(MemoryProvider):
         )
         if self._retain_chunk_every_n_turns < 2:
             self._retain_chunk_every_n_turns = 0
-        self._retain_chunk_overlap_turns = _normalize_nonnegative_int(
-            self._config.get("retain_chunk_overlap_turns")
-            or os.environ.get("HINDSIGHT_RETAIN_CHUNK_OVERLAP_TURNS", "0"),
-            default=0,
-        )
 
         # Retain controls
         self._auto_retain = self._config.get("auto_retain", True)
@@ -931,7 +923,7 @@ class HindsightMemoryProvider(MemoryProvider):
         self._turn_index += 1
         self._turn_counter += 1
         self._turn_history.append({"user": user_content, "assistant": assistant_content})
-        max_window_turns = max(1, self._retain_chunk_every_n_turns + self._retain_chunk_overlap_turns)
+        max_window_turns = max(1, self._retain_chunk_every_n_turns)
         if len(self._turn_history) > max_window_turns:
             self._turn_history = self._turn_history[-max_window_turns:]
 
@@ -946,8 +938,7 @@ class HindsightMemoryProvider(MemoryProvider):
         window_context = f"{base_context}_window"
         chunk_turns: List[Dict[str, str]] = []
         if self._retain_chunk_every_n_turns and current_turn_index % self._retain_chunk_every_n_turns == 0:
-            window_turns = self._retain_chunk_every_n_turns + self._retain_chunk_overlap_turns
-            chunk_turns = self._turn_history[-window_turns:]
+            chunk_turns = self._turn_history[-self._retain_chunk_every_n_turns:]
 
         def _sync():
             try:

@@ -298,6 +298,7 @@ The setup wizard installs dependencies automatically and only installs what's ne
 | `auto_recall` | `true` | Automatically recall memories before each turn |
 | `retain_async` | `true` | Process retain asynchronously on the server |
 | `retain_context` | `conversation between Hermes Agent and the User` | Base context label for retained memories; periodic window docs use `<retain_context>_window` |
+| `retain_chunk_every_n_turns` | `0` | Also retain a sliding conversation window every N turns (`0` disables); each window includes the last N turns |
 | `retain_tags` | — | Default tags applied to retained memories; merged with per-call tool tags |
 | `recall_tags` | — | Tags to filter on recall |
 

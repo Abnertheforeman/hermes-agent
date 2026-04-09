@@ -36,7 +36,7 @@ def _clean_env(monkeypatch):
         "HINDSIGHT_BUDGET", "HINDSIGHT_MODE", "HINDSIGHT_LLM_API_KEY",
         "HINDSIGHT_RETAIN_TAGS", "HINDSIGHT_RETAIN_SOURCE",
         "HINDSIGHT_RETAIN_USER_PREFIX", "HINDSIGHT_RETAIN_ASSISTANT_PREFIX",
-        "HINDSIGHT_RETAIN_CHUNK_EVERY_N_TURNS", "HINDSIGHT_RETAIN_CHUNK_OVERLAP_TURNS",
+        "HINDSIGHT_RETAIN_CHUNK_EVERY_N_TURNS",
     ):
         monkeypatch.delenv(key, raising=False)
 
@@ -183,7 +183,6 @@ class TestConfig:
             retain_user_prefix="User (Josh)",
             retain_assistant_prefix="Assistant (Abner)",
             retain_chunk_every_n_turns=2,
-            retain_chunk_overlap_turns=1,
             recall_tags=["recall-tag"],
             recall_tags_match="all",
             auto_retain=False,
@@ -203,7 +202,6 @@ class TestConfig:
         assert p._retain_user_prefix == "User (Josh)"
         assert p._retain_assistant_prefix == "Assistant (Abner)"
         assert p._retain_chunk_every_n_turns == 2
-        assert p._retain_chunk_overlap_turns == 1
         assert p._recall_tags == ["recall-tag"]
         assert p._recall_tags_match == "all"
         assert p._auto_retain is False
@@ -495,7 +493,6 @@ class TestSyncTurn:
     def test_sync_turn_emits_periodic_conversation_windows(self, provider_with_config):
         p = provider_with_config(
             retain_chunk_every_n_turns=2,
-            retain_chunk_overlap_turns=1,
             retain_context="custom-ctx",
             retain_async=False,
             retain_user_prefix="User (Josh)",
@@ -572,7 +569,7 @@ class TestConfigSchema:
             "recall_budget", "memory_mode", "recall_prefetch_method",
             "retain_tags", "retain_source",
             "retain_user_prefix", "retain_assistant_prefix",
-            "retain_chunk_every_n_turns", "retain_chunk_overlap_turns",
+            "retain_chunk_every_n_turns",
             "recall_tags", "recall_tags_match",
             "auto_recall", "auto_retain",
             "retain_every_n_turns", "retain_async",
