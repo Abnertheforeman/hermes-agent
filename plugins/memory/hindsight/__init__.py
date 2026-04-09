@@ -895,6 +895,7 @@ class HindsightMemoryProvider(MemoryProvider):
         document_id: str | None = None,
         metadata: Dict[str, str] | None = None,
         tags: List[str] | None = None,
+        retain_async: bool | None = None,
     ) -> Dict[str, Any]:
         kwargs: Dict[str, Any] = {
             "bank_id": self._bank_id,
@@ -909,6 +910,8 @@ class HindsightMemoryProvider(MemoryProvider):
             kwargs["context"] = context
         if document_id:
             kwargs["document_id"] = document_id
+        if retain_async is not None:
+            kwargs["retain_async"] = retain_async
         merged_tags = _normalize_retain_tags(self._retain_tags)
         for tag in _normalize_retain_tags(tags):
             if tag not in merged_tags:
@@ -939,6 +942,8 @@ class HindsightMemoryProvider(MemoryProvider):
 
         current_turn_index = self._turn_index
         combined = self._build_turn_content(user_content, assistant_content)
+        base_context = str(self._retain_context or "conversation").strip() or "conversation"
+        window_context = f"{base_context}_window"
         chunk_turns: List[Dict[str, str]] = []
         if self._retain_chunk_every_n_turns and current_turn_index % self._retain_chunk_every_n_turns == 0:
             window_turns = self._retain_chunk_every_n_turns + self._retain_chunk_overlap_turns
@@ -949,20 +954,21 @@ class HindsightMemoryProvider(MemoryProvider):
                 client = self._get_client()
                 _run_sync(client.aretain(**self._build_retain_kwargs(
                     combined,
-                    context="conversation",
+                    context=base_context,
                     document_id=self._turn_document_id(current_turn_index),
                     metadata=self._build_metadata(
                         scope="turn",
                         message_count=2,
                         turn_index=current_turn_index,
                     ),
+                    retain_async=self._retain_async,
                 )))
                 if chunk_turns:
                     chunk_content = self._build_chunk_content(chunk_turns)
                     if chunk_content:
                         _run_sync(client.aretain(**self._build_retain_kwargs(
                             chunk_content,
-                            context="conversation_window",
+                            context=window_context,
                             document_id=self._chunk_document_id(current_turn_index),
                             metadata=self._build_metadata(
                                 scope="window",
@@ -970,6 +976,7 @@ class HindsightMemoryProvider(MemoryProvider):
                                 turn_index=current_turn_index,
                                 window_turns=len(chunk_turns),
                             ),
+                            retain_async=self._retain_async,
                         )))
             except Exception as e:
                 logger.warning("Hindsight sync failed: %s", e, exc_info=True)
