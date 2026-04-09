@@ -43,8 +43,21 @@ def _clean_env(monkeypatch):
 
 def _make_mock_client():
     """Create a mock Hindsight client with async methods."""
+    async def _aretain(
+        bank_id,
+        content,
+        timestamp=None,
+        context=None,
+        document_id=None,
+        metadata=None,
+        entities=None,
+        tags=None,
+        update_mode=None,
+    ):
+        return SimpleNamespace(ok=True)
+
     client = MagicMock()
-    client.aretain = AsyncMock()
+    client.aretain = AsyncMock(side_effect=_aretain)
     client.arecall = AsyncMock(
         return_value=SimpleNamespace(
             results=[
@@ -452,7 +465,6 @@ class TestSyncTurn:
         call_kwargs = p._client.aretain.call_args.kwargs
         assert call_kwargs["context"] == "conversation between Hermes Agent and the User"
         assert call_kwargs["document_id"] == "hermes:session-1:turn:000001"
-        assert call_kwargs["retain_async"] is True
         assert call_kwargs["tags"] == ["conv", "session1"]
         assert call_kwargs["content"] == "User (Josh): hello\nAssistant (Abner): hi there"
         assert call_kwargs["metadata"]["source"] == "hermes"
@@ -477,7 +489,7 @@ class TestSyncTurn:
         p._client.aretain.assert_not_called()
 
     def test_sync_turn_every_n_turns(self, provider_with_config):
-        p = provider_with_config(retain_every_n_turns=3, retain_async=False)
+        p = provider_with_config(retain_every_n_turns=3)
         p.sync_turn("turn1-user", "turn1-asst")
         assert p._sync_thread is None
         p.sync_turn("turn2-user", "turn2-asst")
@@ -487,14 +499,12 @@ class TestSyncTurn:
         p._client.aretain.assert_called_once()
         call_kwargs = p._client.aretain.call_args.kwargs
         assert call_kwargs["document_id"] == "hermes:test-session:turn:000003"
-        assert call_kwargs["retain_async"] is False
         assert "turn3-user" in call_kwargs["content"]
 
     def test_sync_turn_emits_periodic_conversation_windows(self, provider_with_config):
         p = provider_with_config(
             retain_chunk_every_n_turns=2,
             retain_context="custom-ctx",
-            retain_async=False,
             retain_user_prefix="User (Josh)",
             retain_assistant_prefix="Assistant (Abner)",
         )
@@ -511,9 +521,7 @@ class TestSyncTurn:
         assert second_turn["document_id"] == "hermes:test-session:turn:000002"
         assert window["document_id"] == "hermes:test-session:window:000002"
         assert second_turn["context"] == "custom-ctx"
-        assert second_turn["retain_async"] is False
         assert window["context"] == "custom-ctx_window"
-        assert window["retain_async"] is False
         assert window["metadata"]["retention_scope"] == "window"
         assert window["metadata"]["window_turns"] == "2"
         assert window["metadata"]["message_count"] == "4"
@@ -572,8 +580,7 @@ class TestConfigSchema:
             "retain_chunk_every_n_turns",
             "recall_tags", "recall_tags_match",
             "auto_recall", "auto_retain",
-            "retain_every_n_turns", "retain_async",
-            "retain_context",
+            "retain_every_n_turns", "retain_context",
             "recall_max_tokens", "recall_max_input_chars",
             "recall_prompt_preamble",
         }
