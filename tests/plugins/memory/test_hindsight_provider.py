@@ -36,7 +36,6 @@ def _clean_env(monkeypatch):
         "HINDSIGHT_BUDGET", "HINDSIGHT_MODE", "HINDSIGHT_LLM_API_KEY",
         "HINDSIGHT_RETAIN_TAGS", "HINDSIGHT_RETAIN_SOURCE",
         "HINDSIGHT_RETAIN_USER_PREFIX", "HINDSIGHT_RETAIN_ASSISTANT_PREFIX",
-        "HINDSIGHT_RETAIN_CHUNK_EVERY_N_TURNS",
     ):
         monkeypatch.delenv(key, raising=False)
 
@@ -204,7 +203,6 @@ class TestConfig:
             retain_source="hermes",
             retain_user_prefix="User (Josh)",
             retain_assistant_prefix="Assistant (Abner)",
-            retain_chunk_every_n_turns=2,
             recall_tags=["recall-tag"],
             recall_tags_match="all",
             auto_retain=False,
@@ -223,7 +221,6 @@ class TestConfig:
         assert p._retain_source == "hermes"
         assert p._retain_user_prefix == "User (Josh)"
         assert p._retain_assistant_prefix == "Assistant (Abner)"
-        assert p._retain_chunk_every_n_turns == 2
         assert p._recall_tags == ["recall-tag"]
         assert p._recall_tags_match == "all"
         assert p._auto_retain is False
@@ -447,129 +444,6 @@ class TestPrefetch:
 
 
 class TestSyncTurn:
-    def test_initialize_restores_turn_state_from_session_history(self, tmp_path, monkeypatch):
-        config = {
-            "mode": "cloud",
-            "apiKey": "***",
-            "api_url": "http://localhost:9999",
-            "bank_id": "test-bank",
-            "budget": "mid",
-            "memory_mode": "hybrid",
-            "retain_chunk_every_n_turns": 2,
-        }
-        config_path = tmp_path / "hindsight" / "config.json"
-        config_path.parent.mkdir(parents=True, exist_ok=True)
-        config_path.write_text(json.dumps(config))
-        monkeypatch.setattr("plugins.memory.hindsight.get_hermes_home", lambda: tmp_path)
-
-        session_db = _FakeSessionDB([
-            {"role": "user", "content": "turn1-user"},
-            {"role": "assistant", "content": "turn1-tool-plan"},
-            {"role": "tool", "content": "tool output"},
-            {"role": "assistant", "content": "turn1-final"},
-            {"role": "user", "content": "turn2-user"},
-            {"role": "assistant", "content": "turn2-final"},
-        ])
-
-        p = HindsightMemoryProvider()
-        p.initialize(
-            session_id="test-session",
-            hermes_home=str(tmp_path),
-            platform="cli",
-            session_db=session_db,
-        )
-
-        assert p._turn_index == 2
-        assert p._turn_counter == 2
-        assert p._turn_history == [
-            {"user": "turn1-user", "assistant": "turn1-final"},
-            {"user": "turn2-user", "assistant": "turn2-final"},
-        ]
-
-    def test_sync_turn_resumes_turn_numbering_from_session_history(self, tmp_path, monkeypatch):
-        config = {
-            "mode": "cloud",
-            "apiKey": "***",
-            "api_url": "http://localhost:9999",
-            "bank_id": "test-bank",
-            "budget": "mid",
-            "memory_mode": "hybrid",
-        }
-        config_path = tmp_path / "hindsight" / "config.json"
-        config_path.parent.mkdir(parents=True, exist_ok=True)
-        config_path.write_text(json.dumps(config))
-        monkeypatch.setattr("plugins.memory.hindsight.get_hermes_home", lambda: tmp_path)
-
-        session_db = _FakeSessionDB([
-            {"role": "user", "content": "turn1-user"},
-            {"role": "assistant", "content": "turn1-final"},
-            {"role": "user", "content": "turn2-user"},
-            {"role": "assistant", "content": "turn2-final"},
-        ])
-
-        p = HindsightMemoryProvider()
-        p.initialize(
-            session_id="test-session",
-            hermes_home=str(tmp_path),
-            platform="cli",
-            session_db=session_db,
-        )
-        p._client = _make_mock_client()
-
-        p.sync_turn("turn3-user", "turn3-final")
-        p._sync_thread.join(timeout=5.0)
-
-        call_kwargs = p._client.aretain.call_args.kwargs
-        assert call_kwargs["document_id"] == "hermes:test-session:turn:000003"
-        assert call_kwargs["metadata"]["turn_index"] == "3"
-
-    def test_sync_turn_resumed_chunk_window_uses_restored_history(self, tmp_path, monkeypatch):
-        config = {
-            "mode": "cloud",
-            "apiKey": "***",
-            "api_url": "http://localhost:9999",
-            "bank_id": "test-bank",
-            "budget": "mid",
-            "memory_mode": "hybrid",
-            "retain_chunk_every_n_turns": 2,
-            "retain_async": False,
-            "retain_user_prefix": "User (Josh)",
-            "retain_assistant_prefix": "Assistant (Abner)",
-        }
-        config_path = tmp_path / "hindsight" / "config.json"
-        config_path.parent.mkdir(parents=True, exist_ok=True)
-        config_path.write_text(json.dumps(config))
-        monkeypatch.setattr("plugins.memory.hindsight.get_hermes_home", lambda: tmp_path)
-
-        session_db = _FakeSessionDB([
-            {"role": "user", "content": "turn1-user"},
-            {"role": "assistant", "content": "turn1-final"},
-        ])
-
-        p = HindsightMemoryProvider()
-        p.initialize(
-            session_id="test-session",
-            hermes_home=str(tmp_path),
-            platform="cli",
-            session_db=session_db,
-        )
-        p._client = _make_mock_client()
-
-        p.sync_turn("turn2-user", "turn2-final")
-        p._sync_thread.join(timeout=5.0)
-
-        assert p._client.aretain.call_count == 2
-        second_turn = p._client.aretain.call_args_list[0].kwargs
-        window = p._client.aretain.call_args_list[1].kwargs
-        assert second_turn["document_id"] == "hermes:test-session:turn:000002"
-        assert second_turn["retain_async"] is False
-        assert window["document_id"] == "hermes:test-session:window:000002"
-        assert window["retain_async"] is False
-        assert window["content"] == (
-            "User (Josh): turn1-user\nAssistant (Abner): turn1-final\n\n"
-            "User (Josh): turn2-user\nAssistant (Abner): turn2-final"
-        )
-
     def test_sync_turn_retains_metadata_rich_turn(self, provider_with_config):
         p = provider_with_config(
             retain_tags=["conv", "session1"],
@@ -593,33 +467,40 @@ class TestSyncTurn:
         p.sync_turn("hello", "hi there")
         p._sync_thread.join(timeout=5.0)
 
-        p._client.aretain.assert_called_once()
-        call_kwargs = p._client.aretain.call_args.kwargs
-        assert call_kwargs["context"] == "conversation between Hermes Agent and the User"
-        assert call_kwargs["document_id"] == "hermes:session-1:turn:000001"
+        p._client.aretain_batch.assert_called_once()
+        call_kwargs = p._client.aretain_batch.call_args.kwargs
+        assert call_kwargs["bank_id"] == "test-bank"
+        assert call_kwargs["document_id"] == "session-1"
         assert call_kwargs["retain_async"] is True
-        assert call_kwargs["tags"] == ["conv", "session1"]
-        assert call_kwargs["content"] == "User (Josh): hello\nAssistant (Abner): hi there"
-        assert call_kwargs["metadata"]["source"] == "hermes"
-        assert call_kwargs["metadata"]["session_id"] == "session-1"
-        assert call_kwargs["metadata"]["platform"] == "discord"
-        assert call_kwargs["metadata"]["user_id"] == "josh-123"
-        assert call_kwargs["metadata"]["user_name"] == "Josh"
-        assert call_kwargs["metadata"]["chat_id"] == "1485316232612941897"
-        assert call_kwargs["metadata"]["chat_name"] == "abner-forums"
-        assert call_kwargs["metadata"]["chat_type"] == "thread"
-        assert call_kwargs["metadata"]["thread_id"] == "1491249007475949698"
-        assert call_kwargs["metadata"]["agent_identity"] == "abner"
-        assert call_kwargs["metadata"]["retention_scope"] == "turn"
-        assert call_kwargs["metadata"]["turn_index"] == "1"
-        assert call_kwargs["metadata"]["message_count"] == "2"
-        assert re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z", call_kwargs["metadata"]["retained_at"])
+        assert len(call_kwargs["items"]) == 1
+        item = call_kwargs["items"][0]
+        assert item["context"] == "conversation between Hermes Agent and the User"
+        assert item["tags"] == ["conv", "session1"]
+        content = json.loads(item["content"])
+        assert content == [[
+            {"role": "user", "content": "hello", "timestamp": content[0][0]["timestamp"]},
+            {"role": "assistant", "content": "hi there", "timestamp": content[0][1]["timestamp"]},
+        ]]
+        assert item["metadata"]["source"] == "hermes"
+        assert item["metadata"]["session_id"] == "session-1"
+        assert item["metadata"]["platform"] == "discord"
+        assert item["metadata"]["user_id"] == "josh-123"
+        assert item["metadata"]["user_name"] == "Josh"
+        assert item["metadata"]["chat_id"] == "1485316232612941897"
+        assert item["metadata"]["chat_name"] == "abner-forums"
+        assert item["metadata"]["chat_type"] == "thread"
+        assert item["metadata"]["thread_id"] == "1491249007475949698"
+        assert item["metadata"]["agent_identity"] == "abner"
+        assert item["metadata"]["turn_index"] == "1"
+        assert item["metadata"]["message_count"] == "2"
+        assert re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?\+00:00", content[0][0]["timestamp"])
+        assert re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z", item["metadata"]["retained_at"])
 
     def test_sync_turn_skipped_when_auto_retain_off(self, provider_with_config):
         p = provider_with_config(auto_retain=False)
         p.sync_turn("hello", "hi")
         assert p._sync_thread is None
-        p._client.aretain.assert_not_called()
+        p._client.aretain_batch.assert_not_called()
 
     def test_sync_turn_every_n_turns(self, provider_with_config):
         p = provider_with_config(retain_every_n_turns=3, retain_async=False)
@@ -629,43 +510,19 @@ class TestSyncTurn:
         assert p._sync_thread is None
         p.sync_turn("turn3-user", "turn3-asst")
         p._sync_thread.join(timeout=5.0)
-        p._client.aretain.assert_called_once()
-        call_kwargs = p._client.aretain.call_args.kwargs
-        assert call_kwargs["document_id"] == "hermes:test-session:turn:000003"
+        p._client.aretain_batch.assert_called_once()
+        call_kwargs = p._client.aretain_batch.call_args.kwargs
+        assert call_kwargs["document_id"] == "test-session"
         assert call_kwargs["retain_async"] is False
-        assert "turn3-user" in call_kwargs["content"]
-
-    def test_sync_turn_emits_periodic_conversation_windows(self, provider_with_config):
-        p = provider_with_config(
-            retain_chunk_every_n_turns=2,
-            retain_context="custom-ctx",
-            retain_user_prefix="User (Josh)",
-            retain_assistant_prefix="Assistant (Abner)",
-        )
-        p.sync_turn("turn1-user", "turn1-asst")
-        p._sync_thread.join(timeout=5.0)
-        p.sync_turn("turn2-user", "turn2-asst")
-        p._sync_thread.join(timeout=5.0)
-
-        assert p._client.aretain.call_count == 3
-        first_turn = p._client.aretain.call_args_list[0].kwargs
-        second_turn = p._client.aretain.call_args_list[1].kwargs
-        window = p._client.aretain.call_args_list[2].kwargs
-        assert first_turn["document_id"] == "hermes:test-session:turn:000001"
-        assert second_turn["document_id"] == "hermes:test-session:turn:000002"
-        assert window["document_id"] == "hermes:test-session:window:000002"
-        assert second_turn["context"] == "custom-ctx"
-        assert window["context"] == "custom-ctx_window"
-        assert window["metadata"]["retention_scope"] == "window"
-        assert window["metadata"]["window_turns"] == "2"
-        assert window["metadata"]["message_count"] == "4"
-        assert window["content"] == (
-            "User (Josh): turn1-user\nAssistant (Abner): turn1-asst\n\n"
-            "User (Josh): turn2-user\nAssistant (Abner): turn2-asst"
-        )
+        item = call_kwargs["items"][0]
+        content = json.loads(item["content"])
+        assert len(content) == 3
+        assert content[-1][0]["content"] == "turn3-user"
+        assert item["metadata"]["turn_index"] == "3"
+        assert item["metadata"]["message_count"] == "6"
 
     def test_sync_turn_error_does_not_raise(self, provider):
-        provider._client.aretain.side_effect = RuntimeError("network error")
+        provider._client.aretain_batch.side_effect = RuntimeError("network error")
         provider.sync_turn("hello", "hi")
         if provider._sync_thread:
             provider._sync_thread.join(timeout=5.0)
@@ -711,7 +568,6 @@ class TestConfigSchema:
             "recall_budget", "memory_mode", "recall_prefetch_method",
             "retain_tags", "retain_source",
             "retain_user_prefix", "retain_assistant_prefix",
-            "retain_chunk_every_n_turns",
             "recall_tags", "recall_tags_match",
             "auto_recall", "auto_retain",
             "retain_every_n_turns", "retain_async", "retain_context",

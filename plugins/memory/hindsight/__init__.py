@@ -181,7 +181,6 @@ def _load_config() -> dict:
         "retain_source": os.environ.get("HINDSIGHT_RETAIN_SOURCE", ""),
         "retain_user_prefix": os.environ.get("HINDSIGHT_RETAIN_USER_PREFIX", "User"),
         "retain_assistant_prefix": os.environ.get("HINDSIGHT_RETAIN_ASSISTANT_PREFIX", "Assistant"),
-        "retain_chunk_every_n_turns": os.environ.get("HINDSIGHT_RETAIN_CHUNK_EVERY_N_TURNS", "0"),
         "banks": {
             "hermes": {
                 "bankId": os.environ.get("HINDSIGHT_BANK_ID", "hermes"),
@@ -234,15 +233,6 @@ def _utc_timestamp() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
 
 
-def _normalize_nonnegative_int(value: Any, default: int = 0) -> int:
-    """Coerce *value* to a non-negative integer with fallback to *default*."""
-    try:
-        normalized = int(value)
-    except (TypeError, ValueError):
-        return default
-    return normalized if normalized >= 0 else default
-
-
 # ---------------------------------------------------------------------------
 # MemoryProvider implementation
 # ---------------------------------------------------------------------------
@@ -264,7 +254,6 @@ class HindsightMemoryProvider(MemoryProvider):
         self._retain_source = ""
         self._retain_user_prefix = "User"
         self._retain_assistant_prefix = "Assistant"
-        self._retain_chunk_every_n_turns = 0
         self._platform = ""
         self._user_id = ""
         self._user_name = ""
@@ -274,7 +263,6 @@ class HindsightMemoryProvider(MemoryProvider):
         self._thread_id = ""
         self._agent_identity = ""
         self._turn_index = 0
-        self._turn_history: List[Dict[str, str]] = []
         self._client = None
         self._prefetch_result = ""
         self._prefetch_lock = threading.Lock()
@@ -508,7 +496,6 @@ class HindsightMemoryProvider(MemoryProvider):
             {"key": "retain_source", "description": "Metadata source value attached to retained memories", "default": ""},
             {"key": "retain_user_prefix", "description": "Label used before user turns in retained transcripts", "default": "User"},
             {"key": "retain_assistant_prefix", "description": "Label used before assistant turns in retained transcripts", "default": "Assistant"},
-            {"key": "retain_chunk_every_n_turns", "description": "Also retain a sliding conversation window every N turns (0 disables)", "default": 0},
             {"key": "recall_tags", "description": "Tags to filter when searching memories (comma-separated)", "default": ""},
             {"key": "recall_tags_match", "description": "Tag matching mode for recall", "default": "any", "choices": ["any", "all", "any_strict", "all_strict"]},
             {"key": "auto_recall", "description": "Automatically recall memories before each turn", "default": True},
@@ -552,7 +539,7 @@ class HindsightMemoryProvider(MemoryProvider):
         return self._client
 
     def initialize(self, session_id: str, **kwargs) -> None:
-        self._session_id = session_id
+        self._session_id = str(session_id or "").strip()
 
         # Check client version and auto-upgrade if needed
         try:
@@ -579,9 +566,8 @@ class HindsightMemoryProvider(MemoryProvider):
                     logger.warning("uv not found. Run: pip install 'hindsight-client>=%s'", _MIN_CLIENT_VERSION)
         except Exception:
             pass  # packaging not available or other issue — proceed anyway
-    def initialize(self, session_id: str, **kwargs) -> None:
+
         self._config = _load_config()
-        self._session_id = str(session_id or "").strip()
         self._session_db = kwargs.get("session_db")
         self._platform = str(kwargs.get("platform") or "").strip()
         self._user_id = str(kwargs.get("user_id") or "").strip()
@@ -592,7 +578,7 @@ class HindsightMemoryProvider(MemoryProvider):
         self._thread_id = str(kwargs.get("thread_id") or "").strip()
         self._agent_identity = str(kwargs.get("agent_identity") or "").strip()
         self._turn_index = 0
-        self._turn_history = []
+        self._session_turns = []
         self._mode = self._config.get("mode", "cloud")
         # "local" is a legacy alias for "local_embedded"
         if self._mode == "local":
@@ -634,18 +620,6 @@ class HindsightMemoryProvider(MemoryProvider):
         self._retain_assistant_prefix = str(
             self._config.get("retain_assistant_prefix") or os.environ.get("HINDSIGHT_RETAIN_ASSISTANT_PREFIX", "Assistant")
         ).strip() or "Assistant"
-        self._retain_chunk_every_n_turns = _normalize_nonnegative_int(
-            self._config.get("retain_chunk_every_n_turns")
-            or os.environ.get("HINDSIGHT_RETAIN_CHUNK_EVERY_N_TURNS", "0"),
-            default=0,
-        )
-        if self._retain_chunk_every_n_turns < 2:
-            self._retain_chunk_every_n_turns = 0
-        restored_turns = self._load_persisted_turns()
-        self._turn_index = len(restored_turns)
-        self._turn_counter = self._turn_index
-        max_window_turns = max(1, self._retain_chunk_every_n_turns)
-        self._turn_history = restored_turns[-max_window_turns:]
 
         # Retain controls
         self._auto_retain = self._config.get("auto_retain", True)
@@ -838,52 +812,10 @@ class HindsightMemoryProvider(MemoryProvider):
             f"{self._retain_assistant_prefix}: {assistant_content}"
         )
 
-    def _build_chunk_content(self, turns: List[Dict[str, str]]) -> str:
-        return "\n\n".join(
-            self._build_turn_content(turn["user"], turn["assistant"])
-            for turn in turns
-            if turn.get("user") or turn.get("assistant")
-        )
-
-    def _load_persisted_turns(self) -> List[Dict[str, str]]:
-        """Reconstruct completed turns from persisted session history.
-
-        This lets auto-retain resume stable turn numbering and chunk windows
-        after a process restart, instead of starting back at turn 1.
-        """
-        if not self._session_db or not self._session_id:
-            return []
-        try:
-            messages = self._session_db.get_messages_as_conversation(self._session_id)
-        except Exception:
-            logger.debug("Failed to load persisted conversation history for Hindsight retain", exc_info=True)
-            return []
-
-        turns: List[Dict[str, str]] = []
-        current: Dict[str, str] | None = None
-        for msg in messages or []:
-            if not isinstance(msg, dict):
-                continue
-            role = msg.get("role")
-            content = msg.get("content")
-            if role == "user":
-                if current and (current.get("user") or current.get("assistant")):
-                    turns.append(current)
-                current = {"user": str(content or ""), "assistant": ""}
-            elif role == "assistant" and current is not None:
-                text = str(content or "")
-                if text.strip():
-                    current["assistant"] = text
-
-        if current and (current.get("user") or current.get("assistant")):
-            turns.append(current)
-        return turns
-
-    def _build_metadata(self, *, scope: str, message_count: int, turn_index: int, window_turns: int | None = None) -> Dict[str, str]:
+    def _build_metadata(self, *, message_count: int, turn_index: int) -> Dict[str, str]:
         metadata: Dict[str, str] = {
             "retained_at": _utc_timestamp(),
             "message_count": str(message_count),
-            "retention_scope": scope,
             "turn_index": str(turn_index),
         }
         if self._retain_source:
@@ -906,17 +838,7 @@ class HindsightMemoryProvider(MemoryProvider):
             metadata["thread_id"] = self._thread_id
         if self._agent_identity:
             metadata["agent_identity"] = self._agent_identity
-        if window_turns is not None:
-            metadata["window_turns"] = str(window_turns)
         return metadata
-
-    def _turn_document_id(self, turn_index: int) -> str:
-        base = self._session_id or "session"
-        return f"hermes:{base}:turn:{turn_index:06d}"
-
-    def _chunk_document_id(self, turn_index: int) -> str:
-        base = self._session_id or "session"
-        return f"hermes:{base}:window:{turn_index:06d}"
 
     def _build_retain_kwargs(
         self,
@@ -931,11 +853,7 @@ class HindsightMemoryProvider(MemoryProvider):
         kwargs: Dict[str, Any] = {
             "bank_id": self._bank_id,
             "content": content,
-            "metadata": metadata or self._build_metadata(
-                scope="manual",
-                message_count=1,
-                turn_index=self._turn_index,
-            ),
+            "metadata": metadata or self._build_metadata(message_count=1, turn_index=self._turn_index),
         }
         if context is not None:
             kwargs["context"] = context
@@ -952,62 +870,61 @@ class HindsightMemoryProvider(MemoryProvider):
         return kwargs
 
     def sync_turn(self, user_content: str, assistant_content: str, *, session_id: str = "") -> None:
-        """Retain conversation turn in background (non-blocking)."""
+        """Retain conversation turn in background (non-blocking).
+
+        Respects retain_every_n_turns for batching.
+        """
         if not self._auto_retain:
             logger.debug("sync_turn: skipped (auto_retain disabled)")
             return
 
+        from datetime import datetime, timezone
+        now = datetime.now(timezone.utc).isoformat()
+
         if session_id:
             self._session_id = str(session_id).strip()
-        self._turn_index += 1
+
+        messages = [
+            {"role": "user", "content": user_content, "timestamp": now},
+            {"role": "assistant", "content": assistant_content, "timestamp": now},
+        ]
+
+        turn = json.dumps(messages)
+        self._session_turns.append(turn)
         self._turn_counter += 1
-        self._turn_history.append({"user": user_content, "assistant": assistant_content})
-        max_window_turns = max(1, self._retain_chunk_every_n_turns)
-        if len(self._turn_history) > max_window_turns:
-            self._turn_history = self._turn_history[-max_window_turns:]
+        self._turn_index = self._turn_counter
 
         if self._turn_counter % self._retain_every_n_turns != 0:
-            logger.debug("sync_turn: skipping retain at turn %d due to retain_every_n_turns=%d",
-                         self._turn_counter, self._retain_every_n_turns)
+            logger.debug("sync_turn: buffered turn %d (will retain at turn %d)",
+                         self._turn_counter, self._turn_counter + (self._retain_every_n_turns - self._turn_counter % self._retain_every_n_turns))
             return
 
-        current_turn_index = self._turn_index
-        combined = self._build_turn_content(user_content, assistant_content)
-        base_context = str(self._retain_context or "conversation").strip() or "conversation"
-        window_context = f"{base_context}_window"
-        chunk_turns: List[Dict[str, str]] = []
-        if self._retain_chunk_every_n_turns and current_turn_index % self._retain_chunk_every_n_turns == 0:
-            chunk_turns = self._turn_history[-self._retain_chunk_every_n_turns:]
+        logger.debug("sync_turn: retaining %d turns, total session content %d chars",
+                     len(self._session_turns), sum(len(t) for t in self._session_turns))
+        content = "[" + ",".join(self._session_turns) + "]"
 
         def _sync():
             try:
                 client = self._get_client()
-                _run_sync(client.aretain(**self._build_retain_kwargs(
-                    combined,
-                    context=base_context,
-                    document_id=self._turn_document_id(current_turn_index),
+                item = self._build_retain_kwargs(
+                    content,
+                    context=self._retain_context,
                     metadata=self._build_metadata(
-                        scope="turn",
-                        message_count=2,
-                        turn_index=current_turn_index,
+                        message_count=len(self._session_turns) * 2,
+                        turn_index=self._turn_index,
                     ),
+                )
+                item.pop("bank_id", None)
+                item.pop("retain_async", None)
+                logger.debug("Hindsight retain: bank=%s, doc=%s, async=%s, content_len=%d, num_turns=%d",
+                             self._bank_id, self._session_id, self._retain_async, len(content), len(self._session_turns))
+                _run_sync(client.aretain_batch(
+                    bank_id=self._bank_id,
+                    items=[item],
+                    document_id=self._session_id,
                     retain_async=self._retain_async,
-                )))
-                if chunk_turns:
-                    chunk_content = self._build_chunk_content(chunk_turns)
-                    if chunk_content:
-                        _run_sync(client.aretain(**self._build_retain_kwargs(
-                            chunk_content,
-                            context=window_context,
-                            document_id=self._chunk_document_id(current_turn_index),
-                            metadata=self._build_metadata(
-                                scope="window",
-                                message_count=len(chunk_turns) * 2,
-                                turn_index=current_turn_index,
-                                window_turns=len(chunk_turns),
-                            ),
-                            retain_async=self._retain_async,
-                        )))
+                ))
+                logger.debug("Hindsight retain succeeded")
             except Exception as e:
                 logger.warning("Hindsight sync failed: %s", e, exc_info=True)
 
