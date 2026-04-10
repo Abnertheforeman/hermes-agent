@@ -86,6 +86,8 @@ Config file: `~/.hermes/hindsight/config.json`
 | `retain_context` | `conversation between Hermes Agent and the User` | Context label for retained memories |
 | `retain_tags` | — | Default tags applied to retained memories; merged with per-call tool tags |
 | `retain_source` | — | Optional `metadata.source` attached to retained memories |
+| `retain_user_prefix` | `User` | Label used before user turns in auto-retained transcripts |
+| `retain_assistant_prefix` | `Assistant` | Label used before assistant turns in auto-retained transcripts |
 
 ### Integration
 
