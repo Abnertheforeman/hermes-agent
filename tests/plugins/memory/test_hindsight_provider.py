@@ -476,7 +476,16 @@ class TestSyncTurn:
         item = call_kwargs["items"][0]
         assert item["context"] == "conversation between Hermes Agent and the User"
         assert item["tags"] == ["conv", "session1"]
-        assert item["content"] == "User (Josh): hello\nAssistant (Abner): hi there"
+        content = json.loads(item["content"])
+        assert len(content) == 1
+        assert content[0][0]["role"] == "user"
+        assert content[0][0]["content"] == "hello"
+        assert content[0][0]["speaker_label"] == "User (Josh)"
+        assert content[0][0]["rendered_content"] == "User (Josh): hello"
+        assert content[0][1]["role"] == "assistant"
+        assert content[0][1]["content"] == "hi there"
+        assert content[0][1]["speaker_label"] == "Assistant (Abner)"
+        assert content[0][1]["rendered_content"] == "Assistant (Abner): hi there"
         assert item["metadata"]["source"] == "hermes"
         assert item["metadata"]["session_id"] == "session-1"
         assert item["metadata"]["platform"] == "discord"
@@ -489,6 +498,7 @@ class TestSyncTurn:
         assert item["metadata"]["agent_identity"] == "abner"
         assert item["metadata"]["turn_index"] == "1"
         assert item["metadata"]["message_count"] == "2"
+        assert re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?\+00:00", content[0][0]["timestamp"])
         assert re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z", item["metadata"]["retained_at"])
 
     def test_sync_turn_skipped_when_auto_retain_off(self, provider_with_config):
@@ -510,11 +520,12 @@ class TestSyncTurn:
         assert call_kwargs["document_id"] == "test-session"
         assert call_kwargs["retain_async"] is False
         item = call_kwargs["items"][0]
-        assert item["content"] == (
-            "User: turn1-user\nAssistant: turn1-asst\n\n"
-            "User: turn2-user\nAssistant: turn2-asst\n\n"
-            "User: turn3-user\nAssistant: turn3-asst"
-        )
+        content = json.loads(item["content"])
+        assert len(content) == 3
+        assert content[-1][0]["content"] == "turn3-user"
+        assert content[-1][0]["speaker_label"] == "User"
+        assert content[-1][1]["content"] == "turn3-asst"
+        assert content[-1][1]["speaker_label"] == "Assistant"
         assert item["metadata"]["turn_index"] == "3"
         assert item["metadata"]["message_count"] == "6"
 

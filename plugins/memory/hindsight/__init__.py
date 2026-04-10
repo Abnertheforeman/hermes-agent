@@ -804,11 +804,24 @@ class HindsightMemoryProvider(MemoryProvider):
         self._prefetch_thread = threading.Thread(target=_run, daemon=True, name="hindsight-prefetch")
         self._prefetch_thread.start()
 
-    def _build_turn_content(self, user_content: str, assistant_content: str) -> str:
-        return (
-            f"{self._retain_user_prefix}: {user_content}\n"
-            f"{self._retain_assistant_prefix}: {assistant_content}"
-        )
+    def _build_turn_messages(self, user_content: str, assistant_content: str) -> List[Dict[str, str]]:
+        now = datetime.now(timezone.utc).isoformat()
+        return [
+            {
+                "role": "user",
+                "content": user_content,
+                "timestamp": now,
+                "speaker_label": self._retain_user_prefix,
+                "rendered_content": f"{self._retain_user_prefix}: {user_content}",
+            },
+            {
+                "role": "assistant",
+                "content": assistant_content,
+                "timestamp": now,
+                "speaker_label": self._retain_assistant_prefix,
+                "rendered_content": f"{self._retain_assistant_prefix}: {assistant_content}",
+            },
+        ]
 
     def _build_metadata(self, *, message_count: int, turn_index: int) -> Dict[str, str]:
         metadata: Dict[str, str] = {
@@ -879,7 +892,7 @@ class HindsightMemoryProvider(MemoryProvider):
         if session_id:
             self._session_id = str(session_id).strip()
 
-        turn = self._build_turn_content(user_content, assistant_content)
+        turn = json.dumps(self._build_turn_messages(user_content, assistant_content))
         self._session_turns.append(turn)
         self._turn_counter += 1
         self._turn_index = self._turn_counter
@@ -891,7 +904,7 @@ class HindsightMemoryProvider(MemoryProvider):
 
         logger.debug("sync_turn: retaining %d turns, total session content %d chars",
                      len(self._session_turns), sum(len(t) for t in self._session_turns))
-        content = "\n\n".join(self._session_turns)
+        content = "[" + ",".join(self._session_turns) + "]"
 
         def _sync():
             try:
