@@ -35,7 +35,6 @@ def _clean_env(monkeypatch):
         "HINDSIGHT_API_KEY", "HINDSIGHT_API_URL", "HINDSIGHT_BANK_ID",
         "HINDSIGHT_BUDGET", "HINDSIGHT_MODE", "HINDSIGHT_LLM_API_KEY",
         "HINDSIGHT_RETAIN_TAGS", "HINDSIGHT_RETAIN_SOURCE",
-        "HINDSIGHT_RETAIN_USER_PREFIX", "HINDSIGHT_RETAIN_ASSISTANT_PREFIX",
     ):
         monkeypatch.delenv(key, raising=False)
 
@@ -201,8 +200,6 @@ class TestConfig:
         p = provider_with_config(
             retain_tags=["tag1", "tag2"],
             retain_source="hermes",
-            retain_user_prefix="User (Josh)",
-            retain_assistant_prefix="Assistant (Abner)",
             recall_tags=["recall-tag"],
             recall_tags_match="all",
             auto_retain=False,
@@ -219,8 +216,6 @@ class TestConfig:
         assert p._tags == ["tag1", "tag2"]
         assert p._retain_tags == ["tag1", "tag2"]
         assert p._retain_source == "hermes"
-        assert p._retain_user_prefix == "User (Josh)"
-        assert p._retain_assistant_prefix == "Assistant (Abner)"
         assert p._recall_tags == ["recall-tag"]
         assert p._recall_tags_match == "all"
         assert p._auto_retain is False
@@ -448,8 +443,6 @@ class TestSyncTurn:
         p = provider_with_config(
             retain_tags=["conv", "session1"],
             retain_source="hermes",
-            retain_user_prefix="User (Josh)",
-            retain_assistant_prefix="Assistant (Abner)",
         )
         p.initialize(
             session_id="session-1",
@@ -567,7 +560,6 @@ class TestConfigSchema:
             "llm_model", "bank_id", "bank_mission", "bank_retain_mission",
             "recall_budget", "memory_mode", "recall_prefetch_method",
             "retain_tags", "retain_source",
-            "retain_user_prefix", "retain_assistant_prefix",
             "recall_tags", "recall_tags_match",
             "auto_recall", "auto_retain",
             "retain_every_n_turns", "retain_async", "retain_context",

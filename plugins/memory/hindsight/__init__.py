@@ -13,8 +13,6 @@ Config via environment variables:
   HINDSIGHT_MODE                   — cloud or local (default: cloud)
   HINDSIGHT_RETAIN_TAGS            — comma-separated tags attached to retained memories
   HINDSIGHT_RETAIN_SOURCE          — metadata source value attached to retained memories
-  HINDSIGHT_RETAIN_USER_PREFIX     — label used before user turns in retained transcripts
-  HINDSIGHT_RETAIN_ASSISTANT_PREFIX — label used before assistant turns in retained transcripts
 
 Or via $HERMES_HOME/hindsight/config.json (profile-scoped), falling back to
 ~/.hindsight/config.json (legacy, shared) for backward compatibility.
@@ -179,8 +177,6 @@ def _load_config() -> dict:
         "apiKey": os.environ.get("HINDSIGHT_API_KEY", ""),
         "retain_tags": os.environ.get("HINDSIGHT_RETAIN_TAGS", ""),
         "retain_source": os.environ.get("HINDSIGHT_RETAIN_SOURCE", ""),
-        "retain_user_prefix": os.environ.get("HINDSIGHT_RETAIN_USER_PREFIX", "User"),
-        "retain_assistant_prefix": os.environ.get("HINDSIGHT_RETAIN_ASSISTANT_PREFIX", "Assistant"),
         "banks": {
             "hermes": {
                 "bankId": os.environ.get("HINDSIGHT_BANK_ID", "hermes"),
@@ -252,8 +248,6 @@ class HindsightMemoryProvider(MemoryProvider):
         self._prefetch_method = "recall"  # "recall" or "reflect"
         self._retain_tags: List[str] = []
         self._retain_source = ""
-        self._retain_user_prefix = "User"
-        self._retain_assistant_prefix = "Assistant"
         self._platform = ""
         self._user_id = ""
         self._user_name = ""
@@ -269,7 +263,6 @@ class HindsightMemoryProvider(MemoryProvider):
         self._prefetch_thread = None
         self._sync_thread = None
         self._session_id = ""
-        self._session_db = None
 
         # Tags
         self._tags: list[str] | None = None
@@ -494,8 +487,6 @@ class HindsightMemoryProvider(MemoryProvider):
             {"key": "recall_prefetch_method", "description": "Auto-recall method", "default": "recall", "choices": ["recall", "reflect"]},
             {"key": "retain_tags", "description": "Default tags applied to retained memories (comma-separated)", "default": ""},
             {"key": "retain_source", "description": "Metadata source value attached to retained memories", "default": ""},
-            {"key": "retain_user_prefix", "description": "Label used before user turns in retained transcripts", "default": "User"},
-            {"key": "retain_assistant_prefix", "description": "Label used before assistant turns in retained transcripts", "default": "Assistant"},
             {"key": "recall_tags", "description": "Tags to filter when searching memories (comma-separated)", "default": ""},
             {"key": "recall_tags_match", "description": "Tag matching mode for recall", "default": "any", "choices": ["any", "all", "any_strict", "all_strict"]},
             {"key": "auto_recall", "description": "Automatically recall memories before each turn", "default": True},
@@ -568,7 +559,6 @@ class HindsightMemoryProvider(MemoryProvider):
             pass  # packaging not available or other issue — proceed anyway
 
         self._config = _load_config()
-        self._session_db = kwargs.get("session_db")
         self._platform = str(kwargs.get("platform") or "").strip()
         self._user_id = str(kwargs.get("user_id") or "").strip()
         self._user_name = str(kwargs.get("user_name") or "").strip()
@@ -614,12 +604,6 @@ class HindsightMemoryProvider(MemoryProvider):
         self._retain_source = str(
             self._config.get("retain_source") or os.environ.get("HINDSIGHT_RETAIN_SOURCE", "")
         ).strip()
-        self._retain_user_prefix = str(
-            self._config.get("retain_user_prefix") or os.environ.get("HINDSIGHT_RETAIN_USER_PREFIX", "User")
-        ).strip() or "User"
-        self._retain_assistant_prefix = str(
-            self._config.get("retain_assistant_prefix") or os.environ.get("HINDSIGHT_RETAIN_ASSISTANT_PREFIX", "Assistant")
-        ).strip() or "Assistant"
 
         # Retain controls
         self._auto_retain = self._config.get("auto_retain", True)
@@ -805,12 +789,6 @@ class HindsightMemoryProvider(MemoryProvider):
 
         self._prefetch_thread = threading.Thread(target=_run, daemon=True, name="hindsight-prefetch")
         self._prefetch_thread.start()
-
-    def _build_turn_content(self, user_content: str, assistant_content: str) -> str:
-        return (
-            f"{self._retain_user_prefix}: {user_content}\n"
-            f"{self._retain_assistant_prefix}: {assistant_content}"
-        )
 
     def _build_metadata(self, *, message_count: int, turn_index: int) -> Dict[str, str]:
         metadata: Dict[str, str] = {

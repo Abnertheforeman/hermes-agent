@@ -1107,7 +1107,6 @@ class AIAgent:
                             "platform": platform or "cli",
                             "hermes_home": str(_ghh()),
                             "agent_context": "primary",
-                            "session_db": self._session_db,
                         }
                         if self._parent_session_id:
                             _init_kwargs["parent_session_id"] = self._parent_session_id
