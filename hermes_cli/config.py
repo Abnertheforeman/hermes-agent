@@ -39,6 +39,9 @@ _EXTRA_ENV_KEYS = frozenset({
     "DINGTALK_CLIENT_ID", "DINGTALK_CLIENT_SECRET",
     "FEISHU_APP_ID", "FEISHU_APP_SECRET", "FEISHU_ENCRYPT_KEY", "FEISHU_VERIFICATION_TOKEN",
     "WECOM_BOT_ID", "WECOM_SECRET",
+    "WEIXIN_ACCOUNT_ID", "WEIXIN_TOKEN", "WEIXIN_BASE_URL", "WEIXIN_CDN_BASE_URL",
+    "WEIXIN_HOME_CHANNEL", "WEIXIN_HOME_CHANNEL_NAME", "WEIXIN_DM_POLICY", "WEIXIN_GROUP_POLICY",
+    "WEIXIN_ALLOWED_USERS", "WEIXIN_GROUP_ALLOWED_USERS", "WEIXIN_ALLOW_ALL_USERS",
     "BLUEBUBBLES_SERVER_URL", "BLUEBUBBLES_PASSWORD",
     "TERMINAL_ENV", "TERMINAL_SSH_KEY", "TERMINAL_SSH_PORT",
     "WHATSAPP_MODE", "WHATSAPP_ENABLED",
@@ -158,16 +161,27 @@ def get_project_root() -> Path:
     return Path(__file__).parent.parent.resolve()
 
 def _secure_dir(path):
-    """Set directory to owner-only access (0700). No-op on Windows.
+    """Set directory to owner-only access (0700 by default). No-op on Windows.
 
     Skipped in managed mode — the NixOS module sets group-readable
     permissions (0750) so interactive users in the hermes group can
     share state with the gateway service.
+
+    The mode can be overridden via the HERMES_HOME_MODE environment variable
+    (e.g. HERMES_HOME_MODE=0701) for deployments where a web server (nginx,
+    caddy, etc.) needs to traverse HERMES_HOME to reach a served subdirectory.
+    The execute-only bit on a directory permits cd-through without exposing
+    directory listings.
     """
     if is_managed():
         return
     try:
-        os.chmod(path, 0o700)
+        mode_str = os.environ.get("HERMES_HOME_MODE", "").strip()
+        mode = int(mode_str, 8) if mode_str else 0o700
+    except ValueError:
+        mode = 0o700
+    try:
+        os.chmod(path, mode)
     except (OSError, NotImplementedError):
         pass
 
@@ -197,14 +211,44 @@ def _ensure_default_soul_md(home: Path) -> None:
 
 
 def ensure_hermes_home():
-    """Ensure ~/.hermes directory structure exists with secure permissions."""
+    """Ensure ~/.hermes directory structure exists with secure permissions.
+
+    In managed mode (NixOS), dirs are created by the activation script with
+    setgid + group-writable (2770). We skip mkdir and set umask(0o007) so
+    any files created (e.g. SOUL.md) are group-writable (0660).
+    """
     home = get_hermes_home()
-    home.mkdir(parents=True, exist_ok=True)
-    _secure_dir(home)
+    if is_managed():
+        old_umask = os.umask(0o007)
+        try:
+            _ensure_hermes_home_managed(home)
+        finally:
+            os.umask(old_umask)
+    else:
+        home.mkdir(parents=True, exist_ok=True)
+        _secure_dir(home)
+        for subdir in ("cron", "sessions", "logs", "memories"):
+            d = home / subdir
+            d.mkdir(parents=True, exist_ok=True)
+            _secure_dir(d)
+        _ensure_default_soul_md(home)
+
+
+def _ensure_hermes_home_managed(home: Path):
+    """Managed-mode variant: verify dirs exist (activation creates them), seed SOUL.md."""
+    if not home.is_dir():
+        raise RuntimeError(
+            f"HERMES_HOME {home} does not exist. "
+            "Run 'sudo nixos-rebuild switch' first."
+        )
     for subdir in ("cron", "sessions", "logs", "memories"):
         d = home / subdir
-        d.mkdir(parents=True, exist_ok=True)
-        _secure_dir(d)
+        if not d.is_dir():
+            raise RuntimeError(
+                f"{d} does not exist. "
+                "Run 'sudo nixos-rebuild switch' first."
+            )
+    # Inside umask(0o007) scope — SOUL.md will be created as 0660
     _ensure_default_soul_md(home)
 
 
@@ -225,6 +269,7 @@ DEFAULT_CONFIG = {
         # tools or receiving API responses.  Only fires when the agent has
         # been completely idle for this duration.  0 = unlimited.
         "gateway_timeout": 1800,
+        "service_tier": "",
         # Tool-use enforcement: injects system prompt guidance that tells the
         # model to actually call tools instead of describing intended actions.
         # Values: "auto" (default — applies to gpt/codex models), true/false
@@ -510,6 +555,7 @@ DEFAULT_CONFIG = {
     "discord": {
         "require_mention": True,       # Require @mention to respond in server channels
         "free_response_channels": "",  # Comma-separated channel IDs where bot responds without mention
+        "allowed_channels": "",        # If set, bot ONLY responds in these channel IDs (whitelist)
         "auto_thread": True,           # Auto-create threads on @mention in channels (like Slack)
         "reactions": True,             # Add 👀/✅/❌ reactions to messages during processing
     },
@@ -569,7 +615,7 @@ DEFAULT_CONFIG = {
     },
 
     # Config schema version - bump this when adding new required fields
-    "_config_version": 13,
+    "_config_version": 14,
 }
 
 # =============================================================================
@@ -1186,6 +1232,14 @@ OPTIONAL_ENV_VARS = {
         "category": "messaging",
         "advanced": True,
     },
+    "API_SERVER_MODEL_NAME": {
+        "description": "Model name advertised on /v1/models. Defaults to the profile name (or 'hermes-agent' for the default profile). Useful for multi-user setups with OpenWebUI.",
+        "prompt": "API server model name",
+        "url": None,
+        "password": False,
+        "category": "messaging",
+        "advanced": True,
+    },
     "WEBHOOK_ENABLED": {
         "description": "Enable the webhook platform adapter for receiving events from GitHub, GitLab, etc.",
         "prompt": "Enable webhooks (true/false)",
@@ -1715,6 +1769,56 @@ def migrate_config(interactive: bool = True, quiet: bool = False) -> Dict[str, A
                         print(f"  ✓ Cleared {dead_var} from .env (no longer used — config.yaml is source of truth)")
             except Exception:
                 pass
+
+    # ── Version 13 → 14: migrate legacy flat stt.model to provider section ──
+    # Old configs (and cli-config.yaml.example) had a flat `stt.model` key
+    # that was provider-agnostic.  When the provider was "local" this caused
+    # OpenAI model names (e.g. "whisper-1") to be fed to faster-whisper,
+    # crashing with "Invalid model size".  Move the value into the correct
+    # provider-specific section and remove the flat key.
+    if current_ver < 14:
+        # Read raw config (no defaults merged) to check what the user actually
+        # wrote, then apply changes to the merged config for saving.
+        raw = read_raw_config()
+        raw_stt = raw.get("stt", {})
+        if isinstance(raw_stt, dict) and "model" in raw_stt:
+            legacy_model = raw_stt["model"]
+            provider = raw_stt.get("provider", "local")
+            config = load_config()
+            stt = config.get("stt", {})
+            # Remove the legacy flat key
+            stt.pop("model", None)
+            # Place it in the appropriate provider section only if the
+            # user didn't already set a model there
+            if provider in ("local", "local_command"):
+                # Don't migrate an OpenAI model name into the local section
+                _local_models = {
+                    "tiny.en", "tiny", "base.en", "base", "small.en", "small",
+                    "medium.en", "medium", "large-v1", "large-v2", "large-v3",
+                    "large", "distil-large-v2", "distil-medium.en",
+                    "distil-small.en", "distil-large-v3", "distil-large-v3.5",
+                    "large-v3-turbo", "turbo",
+                }
+                if legacy_model in _local_models:
+                    # Check raw config — only set if user didn't already
+                    # have a nested local.model
+                    raw_local = raw_stt.get("local", {})
+                    if not isinstance(raw_local, dict) or "model" not in raw_local:
+                        local_cfg = stt.setdefault("local", {})
+                        local_cfg["model"] = legacy_model
+                # else: drop it — it was an OpenAI model name, local section
+                # already defaults to "base" via DEFAULT_CONFIG
+            else:
+                # Cloud provider — put it in that provider's section only
+                # if user didn't already set a nested model
+                raw_provider = raw_stt.get(provider, {})
+                if not isinstance(raw_provider, dict) or "model" not in raw_provider:
+                    provider_cfg = stt.setdefault(provider, {})
+                    provider_cfg["model"] = legacy_model
+            config["stt"] = stt
+            save_config(config)
+            if not quiet:
+                print(f"  ✓ Migrated legacy stt.model to provider-specific config")
 
     if current_ver < latest_ver and not quiet:
         print(f"Config version: {current_ver} → {latest_ver}")
