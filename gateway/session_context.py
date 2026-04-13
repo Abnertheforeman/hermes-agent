@@ -37,26 +37,23 @@ needs to replace the import + call site:
 """
 
 from contextvars import ContextVar
-from typing import Optional
 
 # ---------------------------------------------------------------------------
 # Per-task session variables
 # ---------------------------------------------------------------------------
 
-_SESSION_PLATFORM: ContextVar[Optional[str]] = ContextVar("HERMES_SESSION_PLATFORM", default=None)
-_SESSION_CHAT_ID: ContextVar[Optional[str]] = ContextVar("HERMES_SESSION_CHAT_ID", default=None)
-_SESSION_CHAT_NAME: ContextVar[Optional[str]] = ContextVar("HERMES_SESSION_CHAT_NAME", default=None)
-_SESSION_CHAT_TYPE: ContextVar[Optional[str]] = ContextVar("HERMES_SESSION_CHAT_TYPE", default=None)
-_SESSION_THREAD_ID: ContextVar[Optional[str]] = ContextVar("HERMES_SESSION_THREAD_ID", default=None)
-_SESSION_USER_ID: ContextVar[Optional[str]] = ContextVar("HERMES_SESSION_USER_ID", default=None)
-_SESSION_USER_NAME: ContextVar[Optional[str]] = ContextVar("HERMES_SESSION_USER_NAME", default=None)
-_SESSION_KEY: ContextVar[Optional[str]] = ContextVar("HERMES_SESSION_KEY", default=None)
+_SESSION_PLATFORM: ContextVar[str] = ContextVar("HERMES_SESSION_PLATFORM", default="")
+_SESSION_CHAT_ID: ContextVar[str] = ContextVar("HERMES_SESSION_CHAT_ID", default="")
+_SESSION_CHAT_NAME: ContextVar[str] = ContextVar("HERMES_SESSION_CHAT_NAME", default="")
+_SESSION_THREAD_ID: ContextVar[str] = ContextVar("HERMES_SESSION_THREAD_ID", default="")
+_SESSION_USER_ID: ContextVar[str] = ContextVar("HERMES_SESSION_USER_ID", default="")
+_SESSION_USER_NAME: ContextVar[str] = ContextVar("HERMES_SESSION_USER_NAME", default="")
+_SESSION_KEY: ContextVar[str] = ContextVar("HERMES_SESSION_KEY", default="")
 
 _VAR_MAP = {
     "HERMES_SESSION_PLATFORM": _SESSION_PLATFORM,
     "HERMES_SESSION_CHAT_ID": _SESSION_CHAT_ID,
     "HERMES_SESSION_CHAT_NAME": _SESSION_CHAT_NAME,
-    "HERMES_SESSION_CHAT_TYPE": _SESSION_CHAT_TYPE,
     "HERMES_SESSION_THREAD_ID": _SESSION_THREAD_ID,
     "HERMES_SESSION_USER_ID": _SESSION_USER_ID,
     "HERMES_SESSION_USER_NAME": _SESSION_USER_NAME,
@@ -68,7 +65,6 @@ def set_session_vars(
     platform: str = "",
     chat_id: str = "",
     chat_name: str = "",
-    chat_type: str = "",
     thread_id: str = "",
     user_id: str = "",
     user_name: str = "",
@@ -86,7 +82,6 @@ def set_session_vars(
         _SESSION_PLATFORM.set(platform),
         _SESSION_CHAT_ID.set(chat_id),
         _SESSION_CHAT_NAME.set(chat_name),
-        _SESSION_CHAT_TYPE.set(chat_type),
         _SESSION_THREAD_ID.set(thread_id),
         _SESSION_USER_ID.set(user_id),
         _SESSION_USER_NAME.set(user_name),
@@ -103,7 +98,6 @@ def clear_session_vars(tokens: list) -> None:
         _SESSION_PLATFORM,
         _SESSION_CHAT_ID,
         _SESSION_CHAT_NAME,
-        _SESSION_CHAT_TYPE,
         _SESSION_THREAD_ID,
         _SESSION_USER_ID,
         _SESSION_USER_NAME,
@@ -128,7 +122,7 @@ def get_session_env(name: str, default: str = "") -> str:
     var = _VAR_MAP.get(name)
     if var is not None:
         value = var.get()
-        if value is not None:
+        if value:
             return value
     # Fall back to os.environ for CLI, cron, and test compatibility
     return os.getenv(name, default)

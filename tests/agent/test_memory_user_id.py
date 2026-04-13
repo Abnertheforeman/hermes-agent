@@ -88,16 +88,16 @@ class TestMemoryManagerUserIdThreading:
             session_id="sess-chat",
             platform="discord",
             user_id="discord_u_7",
-            user_name="Josh",
+            user_name="fakeusername",
             chat_id="1485316232612941897",
-            chat_name="abner-forums",
+            chat_name="fakeassistantname-forums",
             chat_type="thread",
             thread_id="1491249007475949698",
         )
 
-        assert p._init_kwargs.get("user_name") == "Josh"
+        assert p._init_kwargs.get("user_name") == "fakeusername"
         assert p._init_kwargs.get("chat_id") == "1485316232612941897"
-        assert p._init_kwargs.get("chat_name") == "abner-forums"
+        assert p._init_kwargs.get("chat_name") == "fakeassistantname-forums"
         assert p._init_kwargs.get("chat_type") == "thread"
         assert p._init_kwargs.get("thread_id") == "1491249007475949698"
 

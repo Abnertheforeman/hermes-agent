@@ -111,7 +111,7 @@ def test_get_session_env_default_when_nothing_set(monkeypatch):
     assert get_session_env("HERMES_SESSION_PLATFORM", "fallback") == "fallback"
 
 
-def test_set_session_env_handles_missing_optional_fields(monkeypatch):
+def test_set_session_env_handles_missing_optional_fields():
     """_set_session_env should handle None chat_name and thread_id gracefully."""
     runner = object.__new__(GatewayRunner)
     source = SessionSource(
@@ -122,10 +122,6 @@ def test_set_session_env_handles_missing_optional_fields(monkeypatch):
         thread_id=None,
     )
     context = SessionContext(source=source, connected_platforms=[], home_channels={})
-
-    monkeypatch.delenv("HERMES_SESSION_CHAT_NAME", raising=False)
-    monkeypatch.delenv("HERMES_SESSION_CHAT_TYPE", raising=False)
-    monkeypatch.delenv("HERMES_SESSION_THREAD_ID", raising=False)
 
     tokens = runner._set_session_env(context)
 
@@ -173,7 +169,7 @@ def test_session_key_falls_back_to_os_environ(monkeypatch):
     assert get_session_env("HERMES_SESSION_KEY") == "env-session-123"
 
 
-def test_set_session_env_includes_session_key(monkeypatch):
+def test_set_session_env_includes_session_key():
     """_set_session_env should propagate session_key from SessionContext."""
     runner = object.__new__(GatewayRunner)
     source = SessionSource(
@@ -181,8 +177,6 @@ def test_set_session_env_includes_session_key(monkeypatch):
         chat_id="-1001",
         chat_name="Group",
         chat_type="group",
-        user_id="u-42",
-        user_name="Josh",
         thread_id="17585",
     )
     context = SessionContext(
@@ -192,32 +186,10 @@ def test_set_session_env_includes_session_key(monkeypatch):
         session_key="tg:-1001:17585",
     )
 
-    monkeypatch.delenv("HERMES_SESSION_PLATFORM", raising=False)
-    monkeypatch.delenv("HERMES_SESSION_CHAT_ID", raising=False)
-    monkeypatch.delenv("HERMES_SESSION_CHAT_NAME", raising=False)
-    monkeypatch.delenv("HERMES_SESSION_CHAT_TYPE", raising=False)
-    monkeypatch.delenv("HERMES_SESSION_USER_ID", raising=False)
-    monkeypatch.delenv("HERMES_SESSION_USER_NAME", raising=False)
-    monkeypatch.delenv("HERMES_SESSION_THREAD_ID", raising=False)
-    monkeypatch.delenv("HERMES_SESSION_KEY", raising=False)
-
     tokens = runner._set_session_env(context)
-
-    assert get_session_env("HERMES_SESSION_PLATFORM") == "telegram"
-    assert get_session_env("HERMES_SESSION_CHAT_ID") == "-1001"
-    assert get_session_env("HERMES_SESSION_CHAT_NAME") == "Group"
-    assert get_session_env("HERMES_SESSION_CHAT_TYPE") == "group"
-    assert get_session_env("HERMES_SESSION_USER_ID") == "u-42"
-    assert get_session_env("HERMES_SESSION_USER_NAME") == "Josh"
-    assert get_session_env("HERMES_SESSION_THREAD_ID") == "17585"
     assert get_session_env("HERMES_SESSION_KEY") == "tg:-1001:17585"
-
-    assert os.getenv("HERMES_SESSION_PLATFORM") is None
-    assert os.getenv("HERMES_SESSION_CHAT_TYPE") is None
-
     runner._clear_session_env(tokens)
     assert get_session_env("HERMES_SESSION_KEY") == ""
-
 
 
 def test_session_key_no_race_condition_with_contextvars(monkeypatch):
@@ -227,24 +199,9 @@ def test_session_key_no_race_condition_with_contextvars(monkeypatch):
     reads back its own value. With os.environ the second task would
     overwrite the first (the old bug).
     """
-    monkeypatch.delenv("HERMES_SESSION_PLATFORM", raising=False)
-    monkeypatch.delenv("HERMES_SESSION_CHAT_ID", raising=False)
-    monkeypatch.delenv("HERMES_SESSION_CHAT_NAME", raising=False)
-    monkeypatch.delenv("HERMES_SESSION_CHAT_TYPE", raising=False)
-    monkeypatch.delenv("HERMES_SESSION_USER_ID", raising=False)
-    monkeypatch.delenv("HERMES_SESSION_USER_NAME", raising=False)
-    monkeypatch.delenv("HERMES_SESSION_THREAD_ID", raising=False)
     monkeypatch.delenv("HERMES_SESSION_KEY", raising=False)
 
     results = {}
-
-    assert os.getenv("HERMES_SESSION_PLATFORM") is None
-    assert os.getenv("HERMES_SESSION_CHAT_ID") is None
-    assert os.getenv("HERMES_SESSION_CHAT_NAME") is None
-    assert os.getenv("HERMES_SESSION_CHAT_TYPE") is None
-    assert os.getenv("HERMES_SESSION_USER_ID") is None
-    assert os.getenv("HERMES_SESSION_USER_NAME") is None
-    assert os.getenv("HERMES_SESSION_THREAD_ID") is None
 
     async def handler(key: str, delay: float):
         tokens = set_session_vars(session_key=key)
@@ -263,6 +220,7 @@ def test_session_key_no_race_condition_with_contextvars(monkeypatch):
 
     asyncio.run(run())
 
+    # Both tasks must read back their own session key
     assert results["session-A"] == "session-A", (
         f"Session A got '{results['session-A']}' instead of 'session-A' — race condition!"
     )

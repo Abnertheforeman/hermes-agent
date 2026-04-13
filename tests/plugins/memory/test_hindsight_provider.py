@@ -136,15 +136,15 @@ def provider_with_config(tmp_path, monkeypatch):
 
 
 def test_normalize_retain_tags_accepts_csv_and_dedupes():
-    assert _normalize_retain_tags("agent:abner, source_system:hermes-agent, agent:abner") == [
-        "agent:abner",
+    assert _normalize_retain_tags("agent:fakeassistantname, source_system:hermes-agent, agent:fakeassistantname") == [
+        "agent:fakeassistantname",
         "source_system:hermes-agent",
     ]
 
 
 def test_normalize_retain_tags_accepts_json_array_string():
-    value = json.dumps(["agent:abner", "source_system:hermes-agent"])
-    assert _normalize_retain_tags(value) == ["agent:abner", "source_system:hermes-agent"]
+    value = json.dumps(["agent:fakeassistantname", "source_system:hermes-agent"])
+    assert _normalize_retain_tags(value) == ["agent:fakeassistantname", "source_system:hermes-agent"]
 
 
 # ---------------------------------------------------------------------------
@@ -201,8 +201,8 @@ class TestConfig:
         p = provider_with_config(
             retain_tags=["tag1", "tag2"],
             retain_source="hermes",
-            retain_user_prefix="User (Josh)",
-            retain_assistant_prefix="Assistant (Abner)",
+            retain_user_prefix="User (fakeusername)",
+            retain_assistant_prefix="Assistant (fakeassistantname)",
             recall_tags=["recall-tag"],
             recall_tags_match="all",
             auto_retain=False,
@@ -219,8 +219,8 @@ class TestConfig:
         assert p._tags == ["tag1", "tag2"]
         assert p._retain_tags == ["tag1", "tag2"]
         assert p._retain_source == "hermes"
-        assert p._retain_user_prefix == "User (Josh)"
-        assert p._retain_assistant_prefix == "Assistant (Abner)"
+        assert p._retain_user_prefix == "User (fakeusername)"
+        assert p._retain_assistant_prefix == "Assistant (fakeassistantname)"
         assert p._recall_tags == ["recall-tag"]
         assert p._recall_tags_match == "all"
         assert p._auto_retain is False
@@ -448,19 +448,19 @@ class TestSyncTurn:
         p = provider_with_config(
             retain_tags=["conv", "session1"],
             retain_source="hermes",
-            retain_user_prefix="User (Josh)",
-            retain_assistant_prefix="Assistant (Abner)",
+            retain_user_prefix="User (fakeusername)",
+            retain_assistant_prefix="Assistant (fakeassistantname)",
         )
         p.initialize(
             session_id="session-1",
             platform="discord",
-            user_id="josh-123",
-            user_name="Josh",
+            user_id="fakeusername-123",
+            user_name="fakeusername",
             chat_id="1485316232612941897",
-            chat_name="abner-forums",
+            chat_name="fakeassistantname-forums",
             chat_type="thread",
             thread_id="1491249007475949698",
-            agent_identity="abner",
+            agent_identity="fakeassistantname",
         )
         p._client = _make_mock_client()
 
@@ -480,22 +480,22 @@ class TestSyncTurn:
         assert len(content) == 1
         assert content[0][0]["role"] == "user"
         assert content[0][0]["content"] == "hello"
-        assert content[0][0]["speaker_label"] == "User (Josh)"
-        assert content[0][0]["rendered_content"] == "User (Josh): hello"
+        assert content[0][0]["speaker_label"] == "User (fakeusername)"
+        assert content[0][0]["rendered_content"] == "User (fakeusername): hello"
         assert content[0][1]["role"] == "assistant"
         assert content[0][1]["content"] == "hi there"
-        assert content[0][1]["speaker_label"] == "Assistant (Abner)"
-        assert content[0][1]["rendered_content"] == "Assistant (Abner): hi there"
+        assert content[0][1]["speaker_label"] == "Assistant (fakeassistantname)"
+        assert content[0][1]["rendered_content"] == "Assistant (fakeassistantname): hi there"
         assert item["metadata"]["source"] == "hermes"
         assert item["metadata"]["session_id"] == "session-1"
         assert item["metadata"]["platform"] == "discord"
-        assert item["metadata"]["user_id"] == "josh-123"
-        assert item["metadata"]["user_name"] == "Josh"
+        assert item["metadata"]["user_id"] == "fakeusername-123"
+        assert item["metadata"]["user_name"] == "fakeusername"
         assert item["metadata"]["chat_id"] == "1485316232612941897"
-        assert item["metadata"]["chat_name"] == "abner-forums"
+        assert item["metadata"]["chat_name"] == "fakeassistantname-forums"
         assert item["metadata"]["chat_type"] == "thread"
         assert item["metadata"]["thread_id"] == "1491249007475949698"
-        assert item["metadata"]["agent_identity"] == "abner"
+        assert item["metadata"]["agent_identity"] == "fakeassistantname"
         assert item["metadata"]["turn_index"] == "1"
         assert item["metadata"]["message_count"] == "2"
         assert re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?\+00:00", content[0][0]["timestamp"])
