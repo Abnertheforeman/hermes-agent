@@ -809,14 +809,12 @@ class HindsightMemoryProvider(MemoryProvider):
         return [
             {
                 "role": "user",
-                "content": user_content,
                 "timestamp": now,
                 "speaker_label": self._retain_user_prefix,
                 "rendered_content": f"{self._retain_user_prefix}: {user_content}",
             },
             {
                 "role": "assistant",
-                "content": assistant_content,
                 "timestamp": now,
                 "speaker_label": self._retain_assistant_prefix,
                 "rendered_content": f"{self._retain_assistant_prefix}: {assistant_content}",

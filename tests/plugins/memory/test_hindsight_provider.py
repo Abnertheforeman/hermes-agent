@@ -479,11 +479,11 @@ class TestSyncTurn:
         content = json.loads(item["content"])
         assert len(content) == 1
         assert content[0][0]["role"] == "user"
-        assert content[0][0]["content"] == "hello"
+        assert "content" not in content[0][0]
         assert content[0][0]["speaker_label"] == "User (fakeusername)"
         assert content[0][0]["rendered_content"] == "User (fakeusername): hello"
         assert content[0][1]["role"] == "assistant"
-        assert content[0][1]["content"] == "hi there"
+        assert "content" not in content[0][1]
         assert content[0][1]["speaker_label"] == "Assistant (fakeassistantname)"
         assert content[0][1]["rendered_content"] == "Assistant (fakeassistantname): hi there"
         assert item["metadata"]["source"] == "hermes"
@@ -522,10 +522,12 @@ class TestSyncTurn:
         item = call_kwargs["items"][0]
         content = json.loads(item["content"])
         assert len(content) == 3
-        assert content[-1][0]["content"] == "turn3-user"
-        assert content[-1][0]["speaker_label"] == "User"
-        assert content[-1][1]["content"] == "turn3-asst"
-        assert content[-1][1]["speaker_label"] == "Assistant"
+        assert content[-1][0]["role"] == "user"
+        assert "content" not in content[-1][0]
+        assert content[-1][0]["rendered_content"] == "User: turn3-user"
+        assert content[-1][1]["role"] == "assistant"
+        assert "content" not in content[-1][1]
+        assert content[-1][1]["rendered_content"] == "Assistant: turn3-asst"
         assert item["metadata"]["turn_index"] == "3"
         assert item["metadata"]["message_count"] == "6"
 
